@@ -219,6 +219,7 @@ def main():
         # Prepare environment and leader
         if isinstance(leader, TeleopRobot):
             leader.prepare_for_teleop()
+            leader.robot.home(blocking=False, home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))
 
         env.wait_until_ready()
         env.home(home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))

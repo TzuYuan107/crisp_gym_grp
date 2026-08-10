@@ -59,6 +59,11 @@ colcon-common-extensions = "*"
 rosdep = "*"
 ros-jazzy-rmw-cyclonedds-cpp = "*"
 ros-jazzy-image-transport-plugins = "*"
+# Cap below the conda-forge 4.13.0 build so it doesn't get mapped to the pypi
+# opencv-python-headless==4.13.0, which conflicts with lerobot's <4.13.0 pin
+# (via ros-jazzy-cv-bridge, which pulls in py-opencv/libopencv).
+py-opencv = "<4.13"
+libopencv = "<4.13"
 
 # --- PI0.5 SPECIFIC FEATURE ---
 [feature.lerobot.dependencies]
