@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # replace with your dataset repo e.g. cbrian/pi05_test_dataset
-DATASET_REPO=cbrian/dataset_env_SST_SP9_WC1_TC1_task_pickplaceblueblock_numepi_10_ctrl_cartesian
+DATASET_REPO=cbrian/merge_task1_UM_epi_650
 # replace with your output directory e.g. outputs/pi05_test_training
 # NOTE: Keep "outputs/" prefix, only change the folder name after it
-OUTPUT_DIR=outputs/output_folder_name
+OUTPUT_DIR=outputs/testdataset4
 # replace with your job name e.g. pi05_test_training
-JOB_NAME=jobname
+JOB_NAME=jobname2
 # replace with your policy repo e.g. cbrian/pi05_test_trained_policy
-POLICY_REPO=username/policy_name
+POLICY_REPO=cbrian/testdataset4
 
 pixi run -e jazzy-pi05 python -m lerobot.scripts.lerobot_train \
     --dataset.repo_id="$DATASET_REPO" \

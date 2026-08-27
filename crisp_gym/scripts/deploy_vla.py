@@ -43,7 +43,7 @@ def main():
         "--tasks",
         type=str,
         nargs="+",
-        default=["pick the brick."],
+        default=["pick the cube"],
         help="List of task descriptions to record data for, e.g. 'clean red' 'clean green'",
     )
     parser.add_argument(
@@ -302,9 +302,24 @@ def main():
 
         def on_end():
             """Hook function to be called when stopping the recording."""
+            if hasattr(policy, "safety_filter"):
+                # Flush this episode's debug artifacts (obstacle_points.ply, trajectory.png)
+                # now, at the real end of the episode -- otherwise they're only written when
+                # the *next* episode starts or the whole run shuts down cleanly, so the most
+                # recent episode's files go missing if you stop between runs.
+                policy.safety_filter.finalize()
             env.robot.reset_targets()
-            env.robot.home(blocking=False, home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))
-            #env.robot.home(blocking=False)
+            # Blocking (not blocking=False like on_start's) -- the next episode's
+            # policy.make_data_fn() (deploy_vla.py's main loop, called right after this hook
+            # resolves) runs SafetyFilter.reset()'s obstacle re-detection synchronously, using
+            # whatever the camera sees *right then* and whatever end-effector pose is current
+            # *right then* (to seed z_fixed's initial direction). A non-blocking home here let
+            # both of those be captured mid-transit -- gripper still moving through/near the
+            # camera's view of the obstacle, ee_pose not yet settled -- instead of at the actual
+            # home position. Blocking here guarantees the robot has genuinely arrived before any
+            # of that happens, at the cost of delaying the evaluate() prompt below by however
+            # long homing takes.
+            env.robot.home(blocking=True, home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))
             env.gripper.open()
 
             logger.info("Waiting for user to decide on success/failure if evaluating...")

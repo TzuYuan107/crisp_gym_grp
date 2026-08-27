@@ -1,0 +1,156 @@
+name: "vlsa_lerobot_policy"
+
+# CBF safety filter (crisp_gym.safety.SafetyFilterConfig). Disabled by default.
+#
+# mode: "static" -- a single fixed obstacle ellipsoid, given directly below. No camera
+#   needed. obstacle_position has no safe default; it must be a real point in your robot's
+#   base frame before enabling.
+#
+# mode: "point_cloud" -- runs the aegis pipeline every episode: name the likely obstacle,
+#   GroundingDINO finds it in the RGB frame, and its aligned depth is unprojected into a 3D
+#   point cloud that gets fit to an ellipsoid. Needs the extra `safety_camera` block below
+#   (crisp_py's own cameras are RGB-only, so this is a separate ROS2 subscription -- see
+#   crisp_gym/safety/depth_camera.py). Also needs `groundingdino-py` and `open3d` installed
+#   (not pixi.toml deps -- only this mode uses them, `pip install` them into this env before
+#   enabling), plus a downloaded GroundingDINO checkpoint matching
+#   groundingdino_config_path/groundingdino_checkpoint_path.
+#
+#   Naming the obstacle: if obstacle_preference_list has exactly one entry (as below), that
+#   name is used directly as the GroundingDINO prompt every episode -- no VLM call, no
+#   ZHIPUAI_API_KEY needed. Give it 2+ entries (or leave it unset) instead to fall back to a
+#   ZhipuAI VLM picking per-episode based on task_description (needs `zai-sdk` installed and
+#   ZHIPUAI_API_KEY set, or safety.zhipu_api_key below).
+safety:
+  enabled: true
+  #mode: "static"
+  mode: "point_cloud"
+  # Not measured -- taken from episode_0005's actual captured "original (unfiltered)" trajectory
+  # this session (outputs/safety/episode_0005, same "pick the cube" task), which ran roughly
+  # x:[0.33,0.75] y:[0.01,0.04] z:[0.13,0.18]. This is that path's midpoint (~index 30/46 by
+  # step), not its start, so the CBF has runway to react instead of the episode beginning
+  # already inside the obstacle. Move it if your actual trajectory differs.
+  # Nudged left (+y) then down+right (-z, -y), assuming the standard REP-103
+  # X-forward/Y-left/Z-up body-frame convention -- not independently verified for this
+  # robot's actual base-frame orientation, check the next trajectory.html to confirm the
+  # direction and flip the sign if needed.
+  obstacle_position: [0.554, 0.00, 0.09]
+  obstacle_shape_diag: [0.1, 0.1, 0.1]
+
+  # --- mode: "point_cloud" ---
+  # TODO: this region of interest is a generic guess (a box roughly in front of/above a
+  # Panda's base) -- not measured for your actual workspace. It's low-risk to leave as-is:
+  # too narrow just discards real obstacle points (filter goes inactive that episode, i.e.
+  # fails safe), it doesn't invent a phantom obstacle the way a wrong static obstacle_position
+  # would. Narrow it once you've confirmed detection is landing in the right place.
+  xyz_bounds: [[0.0, 0.8], [-0.5, 0.5], [0.0, 1.0]]
+  # xyz_bounds: [[-1.5, 1.5], [-1.5, 1.5], [-1.0, 2.0]]
+  groundingdino_config_path: "/home/cbrian/vlsa/vlsa-aegis/GroundingDINO/GroundingDINO_SwinT_OGC.py"
+  groundingdino_checkpoint_path: "/home/cbrian/vlsa/vlsa-aegis/GroundingDINO/groundingdino_swint_ogc.pth"
+  # obstacle_preference_list: ["yellow-purple gradient cans stand on white can"]
+  # obstacle_preference_list: ["two white top and yellow-purple gradient cans"]
+  obstacle_preference_list: ["the green can"]
+  # obstacle_preference_list: ["glass bottle"]
+  # obstacle_preference_list: ["red can"]
+  # obstacle_preference_list: ["can with yellow-purple gradient"]
+  perception_device: "cuda"
+  # Per-episode obstacle_points.ply / trajectory.png / annotated_detection.jpg. Relative to
+  # wherever you launch crisp-deploy-vla from (this repo's root, normally) -- matches the
+  # existing gitignored outputs/ convention (see .gitignore), instead of the previous
+  # ~/crisp_gym_debug/ location.
+  debug_dir: "outputs/safety"
+
+  # --- MODIFIED: SafetyFilterConfig.ellipsoid_margin_fraction's own class default is 0.15,
+  # explicitly set here (matching it) for clarity/discoverability -- kept in sync with
+  # debug_obstacle_pointcloud.py's own --margin-fraction default so the debug tool's preview
+  # matches what actually gets deployed. Since ellipsoid_fixed_radius is set below, this only
+  # pads y and z (both measured from the point cloud) -- x is a fixed constant you already
+  # chose, so fit_ellipse_from_height_profile deliberately leaves it unpadded.
+  ellipsoid_margin_fraction: 0.15
+
+  # --- MODIFIED: SafetyFilterConfig.ellipsoid_radius_percentile defaults to 100.0 (no
+  # trimming). get_point_cloud's pixel-to-metric unprojection (crisp_gym/safety/perception.py)
+  # amplifies GroundingDINO box slop and depth-sensor noise linearly with the obstacle's
+  # distance from the camera, so at longer range a handful of stray points could inflate the
+  # measured radius well beyond the object's real size. Also used (both ends: percentile and
+  # 100-percentile) to trim the y_range measurement when ellipsoid_fixed_radius is set -- was 90,
+  # loosened to 98 since 90 was cutting off too much of the real y-extent (each end trims
+  # (100-percentile)%, so 90 trimmed ~20% of the true spread total). Raise back toward 100 if
+  # this starts letting stray points inflate the width; lower it if points are still clipped.
+  ellipsoid_radius_percentile: 98.0
+
+  # --- MODIFIED: SafetyFilterConfig.ellipsoid_fixed_radius defaults to None (radius re-measured
+  # from the point cloud's top slice every episode). The obstacle here is a known, fixed-size
+  # object (the same can, repeatedly), so its real radius doesn't actually change with distance --
+  # only the measurement's precision does (pixel-to-metric unprojection amplifies detection-box
+  # slop/depth noise linearly with distance, so a close obstacle fits a slim ellipsoid but a far
+  # one balloons toward a sphere). Fixing the radius at a value measured up close (0.065m
+  # diameter, i.e. 0.0325m radius) keeps the ellipsoid's shape consistent regardless of distance;
+  # center position and height are still measured live each episode as before -- only the radius
+  # stops being re-derived.
+  ellipsoid_fixed_radius: 0.04
+
+  # --- MODIFIED: SafetyFilterConfig.ellipsoid_center_x_offset defaults to 0.0 (no-op). Even
+  # after sourcing the x/y center from the middle slice (ellipsoid_center_fraction) instead of
+  # the top slice, the measured x-center was still off from the obstacle's real position by a
+  # roughly constant amount -- likely residual camera_to_world calibration error. Subtracted
+  # directly from the derived x-center as an empirical correction.
+  ellipsoid_center_x_offset: 0.025
+
+  # --- MODIFIED: SafetyFilterConfig.ellipsoid_height_percentile defaults to 100.0 (no trimming).
+  # Tightened to 95 (matching debug_obstacle_pointcloud.py's own default) so a few stray extreme
+  # points can't inflate the z-extent, same rationale as ellipsoid_radius_percentile.
+  ellipsoid_height_percentile: 95.0
+
+  # --- MODIFIED: z_gain defaults to 10.0 (SafetyFilterConfig). This scales how fast the CBF's
+  # internal separating-direction vector (z_fixed, see SafetyFilter.step) is allowed to rotate
+  # each step -- i.e. how fast "away from the obstacle" is allowed to change direction. Halved
+  # here to test in isolation whether this is the source of corrections feeling like they change
+  # direction suddenly; cbf_alpha deliberately left at its default (10.0) for this test, so any
+  # change in behavior can be attributed to z_gain alone. Raise back toward 10 if the correction
+  # now feels too sluggish to track the obstacle; keep lowering (try ~2) if direction changes are
+  # still too sudden.
+  z_gain: 10.0
+  v_gain: 0.2
+  cbf_alpha: 10.0
+  h_constraint: 0.02
+  h_margin: 0.02
+
+# Only used when safety.mode == "point_cloud". All four topics must share the same pixel
+# grid (e.g. a RealSense stream aligned into the color frame). Matches the third-person
+# camera namespace used in general_panda_follower.yaml (/camera/third_person_camera/...).
+safety_camera:
+  color_image_topic: "/camera/third_person_camera/color/image_raw"
+  depth_image_topic: "/camera/third_person_camera/aligned_depth_to_color/image_raw"
+  depth_info_topic: "/camera/third_person_camera/aligned_depth_to_color/camera_info"
+  camera_frame: "third_person_camera_color_optical_frame"
+  # env.robot.config.base_frame defaults to "base", but this robot's real TF root is
+  # "panda_link0" (confirmed from the live TF tree -- it's every panda_link's ancestor and
+  # never anyone's child).
+  base_frame_override: "panda_link0"
+
+  # Real hand-eye calibration result (from `ros2 run tf2_ros static_transform_publisher --x
+  # 1.609799 --y -0.405285 --z 0.301698 --qx -0.545465 --qy -0.431782 --qz 0.421614 --qw
+  # 0.581613 --frame-id panda_link0 --child-frame-id
+  # third_person_camera_color_optical_frame`), baked in here as a fixed matrix instead of
+  # relying on that publisher running live. If the camera or robot base ever moves relative to
+  # each other, this goes stale and must be recalibrated -- switch back to a live TF lookup
+  # (comment this out) if that's a concern.
+  # Note SafetyRGBDCamera.get_camera_to_world still logs a "TESTING ONLY" warning whenever
+  # dummy_camera_to_world is set, even though this is now a real calibrated value, not a guess.
+  # dummy_camera_to_world:
+  #   - [0.271612, -0.019388, -0.962212, 1.609799]
+  #   - [0.961476, 0.049419, 0.270408, -0.405285]
+  #   - [0.042309, -0.998590, 0.032064, 0.301698]
+  #   - [0.0, 0.0, 0.0, 1.0]
+  # Real hand-eye calibration result (from `ros2 run tf2_ros static_transform_publisher --x
+  # 1.618995 --y -0.203506 --z 0.294337 --qx -0.482032 --qy -0.465499 --qz 0.507458 --qw
+  # 0.541703 --frame-id panda_link0 --child-frame-id
+  # third_person_camera_color_optical_frame`).
+  dummy_camera_to_world:
+    - [0.051594, -0.101012, -0.993546, 1.618995]
+    - [0.998554, 0.020263, 0.049794, -0.143506]
+    - [0.015102, -0.994679, 0.101912, 0.204337]
+    - [0.0, 0.0, 0.0, 1.0]
+
+# overrides:
+#   do_multi_step_sampling: False

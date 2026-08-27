@@ -41,6 +41,8 @@ jazzy = { features = ["jazzy"] }
 jazzy-lerobot = { features = ["jazzy", "lerobot", "dev"]}
 jazzy-pi05 = { features = ["jazzy", "lerobot-pi05", "dev"] }
 jazzy-groot = { features = ["jazzy", "lerobot-groot", "dev"] }
+jazzy-pi05-aegis = { features = ["jazzy", "lerobot-pi05", "dev", "aegis"] }
+jazzy-groot-aegis = { features = ["jazzy", "lerobot-groot", "dev", "aegis"] }
 
 # --- SHARED FEATURES ---
 [feature.dev.pypi-dependencies]
@@ -78,6 +80,11 @@ pynput = "*"
 
 [feature.lerobot-pi05.pypi-dependencies]
 lerobot = { git = "https://github.com/huggingface/lerobot", tag = "v0.4.4", extras = ["pi"] }
+# Pinned to a commit, not the "pi" extra's branch ref (fix/lerobot_openpi) -- a branch can't be
+# durably confirmed unchanged, so pixi was re-resolving both jazzy-pi05 and jazzy-pi05-aegis's
+# entire pypi dependency graph (several minutes) on every single `pixi run`. This is the exact
+# commit that branch already resolved to.
+transformers = { git = "https://github.com/huggingface/transformers", rev = "dcddb970176382c0fcf4521b0c0e6fc15894dfe0" }
 
 # --- GROOT SPECIFIC FEATURE ---
 
@@ -96,6 +103,14 @@ torchcodec = "==0.5.0"
 torchvision = ">=0.21.0,<0.23.0"
 flash-attn = ">=2.5.9,<3.0.0"
 lerobot = { git = "https://github.com/huggingface/lerobot", tag = "v0.4.4", extras = ["groot", "peft"] }
+
+# --- AEGIS SAFETY-FILTER (crisp_gym.safety, mode="point_cloud") SPECIFIC FEATURE ---
+[feature.aegis.dependencies]
+open3d = "*"
+
+[feature.aegis.pypi-dependencies]
+groundingdino-py = "*"
+zai-sdk = "*"
 
 # --- GLOBAL PYPI DEPS ---
 [pypi-dependencies]

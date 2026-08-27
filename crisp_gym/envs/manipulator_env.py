@@ -25,6 +25,7 @@ while True:
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, List, Tuple
 
@@ -304,7 +305,7 @@ class ManipulatorBaseEnv(gym.Env):
             self._previous_rotation_vector = cartesian_pose[3:]
 
         gripper_value = (
-            1 - np.array([self.gripper.value])
+            np.array([self.gripper.raw_value])
             if self.config.gripper_mode != GripperMode.NONE
             else np.array([0.0])
         )
@@ -320,8 +321,10 @@ class ManipulatorBaseEnv(gym.Env):
 
         # Gripper state
         if ObservationKeys.GRIPPER_OBS in self.config.observations_to_include_to_state:
-            #obs[ObservationKeys.GRIPPER_OBS] = gripper_value.astype(np.float32)
-            obs[ObservationKeys.GRIPPER_OBS] = gripper_status.astype(np.float32)
+            if self.config.gripper_mode == GripperMode.ABSOLUTE_CONTINUOUS:
+                obs[ObservationKeys.GRIPPER_OBS] = gripper_value.astype(np.float32)
+            else:
+                obs[ObservationKeys.GRIPPER_OBS] = gripper_status.astype(np.float32)
 
 
         # Joint state
@@ -349,7 +352,7 @@ class ManipulatorBaseEnv(gym.Env):
         if self.config.gripper_mode == GripperMode.NONE:
             return
         
-        elif self.config.gripper_mode == GripperMode.ABSOLUTE_BINARY:
+        elif self.config.gripper_mode == GripperMode.ABSOLUTE_BINARY or self.config.gripper_mode == GripperMode.ABSOLUTE_CONTINUOUS:
             if action < 0.5 and self.gripper.current_status:
                 self.gripper.set_target_status(False) #use new logic in gripper to set gripper state directly instead of using set_target which is for position control
             elif action >= 0.5 and not self.gripper.current_status:
@@ -362,8 +365,8 @@ class ManipulatorBaseEnv(gym.Env):
                 open_threshold=self.config.gripper_threshold
             ):
                 self.gripper.open()
-        elif self.config.gripper_mode == GripperMode.ABSOLUTE_CONTINUOUS:
-            self.gripper.set_target(np.clip(action, 0.0, 1.0))
+        # elif self.config.gripper_mode == GripperMode.ABSOLUTE_CONTINUOUS:
+        #     self.gripper.set_target(np.clip(action, 0.0, 1.0))
         elif self.config.gripper_mode == GripperMode.RELATIVE_CONTINUOUS:
             self.gripper.set_target(np.clip(self.gripper.value + action, 0.0, 1.0))
         else:
@@ -640,6 +643,51 @@ class ManipulatorCartesianEnv(ManipulatorBaseEnv):
             obs[ObservationKeys.TARGET_OBS] = target_pose_array.astype(np.float32)
         return obs
 
+    def _wait_until_target_reached(
+        self,
+        position_tolerance: float = 0.002,
+        orientation_tolerance: float = 0.05,
+        timeout: float = 0.3,
+        poll_interval: float = 0.005,
+    ) -> bool:
+        """Poll the real pose against `robot.target_pose` until close enough, or timeout.
+
+        Deliberately plain `time.sleep()`, not `self.control_rate.sleep()` -- see the FIXME
+        this replaced: that ROS2 `Rate` object's `.sleep()` is documented as producing
+        "unexpected behavior" when actually used, most likely because `Robot`'s owns
+        `MultiThreadedExecutor.spin_once(timeout_sec=0.1)` background loop (servicing pose
+        subscriptions, TF, target publishing, etc. all on the same executor) doesn't guarantee
+        timely, jitter-free service of an additional rate timer under load -- a plain sleep
+        can't have that interaction since it doesn't touch rclpy at all.
+
+        `timeout` defaults short (one nominal control period, not a long wait) since this is a
+        best-effort pacing aid, not a correctness guarantee -- a real compliant/impedance
+        controller can have nonzero steady-state tracking error that never fully closes, and
+        this must never hang the control loop indefinitely if the arm is genuinely stuck.
+
+        Returns:
+            True if within tolerance before the timeout, False if the timeout elapsed first
+            (logged at debug level either way -- callers should not treat False as an error,
+            just as "didn't fully settle in time").
+        """
+        deadline = time.time() + timeout
+        position_error = orientation_error = float("inf")
+        while time.time() < deadline:
+            current = self.robot.end_effector_pose
+            target = self.robot.target_pose
+            position_error = float(np.linalg.norm(current.position - target.position))
+            orientation_error = (target.orientation * current.orientation.inv()).magnitude()
+            if position_error <= position_tolerance and orientation_error <= orientation_tolerance:
+                return True
+            time.sleep(poll_interval)
+        logger.debug(
+            "ManipulatorCartesianEnv: target not reached within %.3fs (pos_err=%.4fm, ori_err=%.4frad)",
+            timeout,
+            position_error,
+            orientation_error,
+        )
+        return False
+
     @override
     def step(self, action: np.ndarray, block: bool = True) -> Tuple[dict, float, bool, bool, dict]:
         """Step the environment with a Cartesian action.
@@ -647,7 +695,10 @@ class ManipulatorCartesianEnv(ManipulatorBaseEnv):
         Args:
             action (np.ndarray): Cartesian delta action [dx, dy, dz, *d_rot_action, gripper_action],
                                 where d_rot_action dimension depends on the chosen orientation representation.
-            block (bool): If True, block to maintain the control rate.
+            block (bool): If True, block briefly (up to one nominal control period) waiting for
+                the real pose to get close to the newly-set target -- see
+                `_wait_until_target_reached` for why this is a best-effort pacing aid, not a
+                guarantee, and deliberately doesn't use `self.control_rate`.
 
         Returns:
             Tuple[dict, float, bool, bool, dict]: Observation, reward, terminated flag, truncated flag, and info dictionary.
@@ -674,9 +725,7 @@ class ManipulatorCartesianEnv(ManipulatorBaseEnv):
             self._set_gripper_action(action[-1])
 
         if block:
-            # FIXME: This control rate sleep is never used and if used by the user
-            # unexpected behavior occurs.
-            self.control_rate.sleep()
+            self._wait_until_target_reached()
 
         _, reward, terminated, truncated, info = super().step(action)
 

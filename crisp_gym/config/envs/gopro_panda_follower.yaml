@@ -1,0 +1,42 @@
+control_frequency: 15.0
+gripper_mode: "absolute_binary"
+max_episode_steps: 1000
+
+# NOTE: These are the defaults anyway
+observations_to_include_to_state:
+  - observation.state.cartesian
+  - observation.state.gripper
+
+cartesian_control_param_config: 
+  from_yaml: control/default_cartesian_impedance.yaml
+joint_control_param_config: null
+     
+robot_config:
+  robot_type: "panda"
+  time_to_home: 10.0
+  publish_frequency: 50.0
+  home_config:
+    - 1.7285
+    - 0.4966
+    - -0.1122
+    - -2.5958
+    - -1.5106
+    - 1.6474
+    - 0.743
+
+gripper_config:
+  # Will be loaded from gripper_right.yaml via GripperConfig.from_yaml()
+  from_yaml: grippers/panda_gripper.yaml
+camera_configs:
+  - camera_name: "gopro"
+    camera_frame: "gopro_link"
+    resolution: [256, 256]
+    camera_color_image_topic: "/gopro/image_raw"
+    camera_color_info_topic: "/gopro/camera_info"
+
+# sensor_configs:
+#   - sensor_type: "force_torque"
+#     shape: [6,]
+#     # buffer_size: 30
+#     name: "ft_sensor"
+#     data_topic: "/right/external_wrench"

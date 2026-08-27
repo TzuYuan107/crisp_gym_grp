@@ -8,6 +8,7 @@ __pycache__
 build/lib
 pixi.lock
 
+train_sh/
 outputs/
 models/
 crisp.log

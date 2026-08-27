@@ -4,6 +4,7 @@
 Usage: python scripts/change_dataset_task.py --repo-id SOURCE/REPO --output-repo-id OUT/REPO --task "new task"
 """
 from pathlib import Path
+import json
 import shutil
 import argparse
 import sys
@@ -90,6 +91,39 @@ def main():
     print("Updating tasks list to single new task...")
     tasks_df = pd.DataFrame({"task_index": [0]}, index=[new_task])
     write_tasks(tasks_df, out_root)
+
+    # tasks.parquet above is rebuilt down to exactly one row (task_index=0), but data/*.parquet's
+    # frame-level task_index column is untouched by shutil.copytree above -- if the source dataset
+    # ever had more than one distinct task (e.g. some episodes originally empty/different before
+    # being unified here, common after merging datasets with inconsistent task labels), those
+    # frames keep whatever task_index they already had, which no longer has a matching row in the
+    # freshly-rebuilt tasks.parquet. That mismatch throws IndexError: single positional indexer is
+    # out-of-bounds the moment LeRobotDataset.__getitem__ hits one of those frames. Remap every
+    # frame to task_index=0 so the output is guaranteed self-consistent.
+    print("Remapping data/*.parquet task_index to 0 (matching the single unified task)...")
+    n_remapped = 0
+    for data_file in sorted(Path(out_root).glob("data/chunk-*/file-*.parquet")):
+        df = pd.read_parquet(data_file)
+        n_remapped += int((df["task_index"] != 0).sum())
+        df["task_index"] = 0
+        df.to_parquet(data_file, index=False)
+    if n_remapped:
+        print(f"  remapped {n_remapped} frame(s) to task_index=0.")
+
+    # meta/stats.json's task_index entry (min/max/mean/etc.) reflects whatever distribution of
+    # indices existed before the remap above -- now stale if there was more than one. Recompute
+    # it as the trivial all-zero stats a single-valued column has (count is unaffected).
+    stats_path = Path(out_root) / "meta" / "stats.json"
+    if stats_path.exists():
+        stats = json.loads(stats_path.read_text())
+        if "task_index" in stats:
+            count = stats["task_index"].get("count", [0])
+            stats["task_index"] = {
+                "min": [0], "max": [0], "mean": [0.0], "std": [0.0], "count": count,
+                "q01": [0.0], "q10": [0.0], "q50": [0.0], "q90": [0.0], "q99": [0.0],
+            }
+            stats_path.write_text(json.dumps(stats, indent=2))
+            print("Corrected meta/stats.json task_index stats to match.")
 
     # Update info.json total_tasks
     info = load_info(out_root)

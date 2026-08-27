@@ -268,6 +268,38 @@ class ManipulatorEnvConfig(ABC):
                         else sensor_config
                     )
 
+        if "cartesian_control_param_config" in data and data["cartesian_control_param_config"] is not None:
+            ccp_cfg = data["cartesian_control_param_config"]
+            if isinstance(ccp_cfg, dict):
+                if "from_yaml" not in ccp_cfg:
+                    raise ValueError(
+                        "cartesian_control_param_config must be null or a dict with a 'from_yaml' key."
+                    )
+                ccp_path = find_config(ccp_cfg["from_yaml"])
+                if ccp_path is None:
+                    raise FileNotFoundError(
+                        f"Cartesian control param config file '{ccp_cfg['from_yaml']}' not found in any CRISP config paths"
+                    )
+                data["cartesian_control_param_config"] = ccp_path.resolve()
+            else:
+                data["cartesian_control_param_config"] = Path(ccp_cfg)
+
+        if "joint_control_param_config" in data and data["joint_control_param_config"] is not None:
+            jcp_cfg = data["joint_control_param_config"]
+            if isinstance(jcp_cfg, dict):
+                if "from_yaml" not in jcp_cfg:
+                    raise ValueError(
+                        "joint_control_param_config must be null or a dict with a 'from_yaml' key."
+                    )
+                jcp_path = find_config(jcp_cfg["from_yaml"])
+                if jcp_path is None:
+                    raise FileNotFoundError(
+                        f"Joint control param config file '{jcp_cfg['from_yaml']}' not found in any CRISP config paths"
+                    )
+                data["joint_control_param_config"] = jcp_path.resolve()
+            else:
+                data["joint_control_param_config"] = Path(jcp_cfg)
+
         return cls(**data)
 
 
@@ -401,14 +433,14 @@ class LeftPandaEnvConfig(FrankaGripperPandaEnvConfig):
             CameraConfig(
                 camera_name="primary",
                 camera_frame="primary_link",
-                resolution=[256, 256],
+                resolution=[256, 342],
                 camera_color_image_topic="/camera/third_person_camera/color/image_raw",
                 camera_color_info_topic="/camera/third_person_camera/color/camera_info",
             ),
             CameraConfig(
                 camera_name="wrist",
                 camera_frame="wrist_link",
-                resolution=[256, 256],
+                resolution=[256, 342],
                 camera_color_image_topic="/camera/wrist_camera/color/image_raw",
                 camera_color_info_topic="/camera/wrist_camera/color/camera_info",
             ),
