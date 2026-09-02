@@ -152,7 +152,7 @@ def main():
         args.leader_config = prompt.prompt(
             "Please enter the leader robot configuration name.",
             options=leader_configs,
-            default=leader_configs[4],
+            default=leader_configs[4qqqq],
         )
         logger.info(f"Using leader configuration: {args.leader_config}")
 

@@ -351,7 +351,7 @@ def main():
         policy.shutdown()
 
         logger.info("Homing robot.")
-        env.home()
+        env.robot.home(blocking=False, home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))
 
         logger.info("Closing the environment.")
         env.close()

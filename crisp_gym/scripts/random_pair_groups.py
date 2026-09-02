@@ -2,8 +2,10 @@
 
 import random
 
-group1 = ["ST", "M", "CO", "R"]
-group2 = ["19X8", "18X4", "3X12", "2X3"]
+# group1 = ["ST", "M", "CO", "R"]
+# group2 = ["19X8", "18X4", "3X12", "2X3"]
+group1 = ["W", "T", "R", "P", "B"]
+group2 = ["19X8", "18X4", "3X12", "2X3", "3X4"]
 
 
 def random_pair_groups(group1: list, group2: list) -> str:

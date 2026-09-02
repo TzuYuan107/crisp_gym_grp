@@ -1,0 +1,78 @@
+limit_error: true
+limit_torques: true
+
+max_delta_tau: 0.5
+
+# MODIFIED from default_cartesian_impedance.yaml's 5.0. Diagnosed via a live joint_states/
+# robot_mode monitor across several REFLEX trips: joint 4 was repeatedly caught sitting at or
+# just past its lower position limit (-3.0718 rad) right before the trip. This is Panda's
+# redundant-DOF bias term -- at stiffness 5.0 it has almost no authority against the task-space
+# gains below (600 N/m position, 30 Nm/rad rotation), so it can't meaningfully steer the arm's
+# null-space motion away from a joint limit when the primary Cartesian task wants a pose that
+# happens to sit right at one. Raised to give it real pull; still well under the task gains so
+# it shouldn't fight the primary Cartesian tracking noticeably. Lower back toward 5.0 if the
+# arm's redundant-joint motion starts feeling stiff/fights teleop; raise further if joints still
+# hit their limits.
+nullspace.stiffness: 5.0
+
+# ADDED: not present in default_cartesian_impedance.yaml either -- neither config set this
+# explicitly, so it was running on whatever internal default the controller falls back to.
+# That default may have been fine paired with the original nullspace.stiffness=5.0, but several
+# captured REFLEX trips after raising stiffness to 15.0 showed joint 5/7 velocity smoothly
+# swinging from one peak, through zero, to an even larger opposite peak over ~1-1.5s -- a
+# textbook underdamped/ringing signature, not a single oversized command (confirmed via a live
+# joint_states monitor; per-step Cartesian velocity/jerk/joint-velocity clamps in
+# crisp_gym/safety/safety_filter.py couldn't prevent it either, since they only constrain the
+# commanded reference, not the controller's own closed-loop response). Set here using the
+# standard critical-damping relation damping ~= 2*sqrt(stiffness) for a unit-mass system:
+# 2*sqrt(15) ~= 7.75, rounded to 8.0. Confirmed real -- other crisp_py controller configs
+# (joint_control.yaml, joint_velocity_control.yaml) do set nullspace.damping explicitly, just
+# not either Cartesian impedance config. Raise if oscillation persists; the arm's redundant-
+# joint motion will feel more sluggish to settle the higher this goes.
+# nullspace.damping: 8.0
+
+stop_commands: false
+
+task.k_pos_x: 600.0
+task.k_pos_y: 600.0
+task.k_pos_z: 600.0
+task.k_rot_x: 30.0
+task.k_rot_y: 30.0
+task.k_rot_z: 30.0
+
+task.d_pos_x: 60.0
+task.d_pos_y: 60.0
+task.d_pos_z: 60.0
+task.d_rot_x: 10.0
+task.d_rot_y: 10.0
+task.d_rot_z: 10.0
+
+# MODIFIED (rx/ry/rz only) from default_cartesian_impedance.yaml's 0.5 rad. At the old clip,
+# the rotational PD term alone can contribute up to k_rot * error_clip = 30 * 0.5 = 15 Nm on a
+# single wrist-adjacent axis -- above the wrist joints' (5-7) 11 Nm collision_behavior torque
+# threshold, before the velocity-damping term or any real dynamics-model mismatch add anything
+# on top. That means a legitimate, clipped (not even anomalous) rotation tracking error was
+# already enough headroom to risk a false-positive collision reflex on a fast correction, since
+# Franka's collision detector reacts to a momentum-observer's *external* torque estimate, and a
+# large/fast commanded correction is exactly what makes that observer's short-horizon model
+# diverge from the real motion. Tightened to 0.25 rad so the worst-case rotational PD
+# contribution (30 * 0.25 = 7.5 Nm) stays comfortably under the 11 Nm wrist threshold even
+# before damping/model-mismatch add more. Position error_clip (x/y/z) left unchanged -- it
+# wasn't implicated in any captured trip, and translation loads the base joints (1-4), whose
+# collision threshold is much higher (85 Nm) with far more headroom.
+# task.error_clip.rx: 0.25
+# task.error_clip.ry: 0.25
+# task.error_clip.rz: 0.25
+task.error_clip.rx: 0.5
+task.error_clip.ry: 0.5
+task.error_clip.rz: 0.5
+task.error_clip.x: 0.1
+task.error_clip.y: 0.1
+task.error_clip.z: 0.1
+
+use_coriolis_compensation: true
+use_friction: true
+use_gravity_compensation: false
+use_local_jacobian: true
+use_operational_space: false
+use_sim_time: false

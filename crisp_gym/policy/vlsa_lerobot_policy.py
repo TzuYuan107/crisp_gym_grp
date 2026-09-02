@@ -227,6 +227,7 @@ class VlsaLerobotPolicy(Policy):
                 rot_dim=rot_dim,
                 dt=dt,
                 comparison_pose=self.env.robot.end_effector_pose,
+                joint_values=self.env.robot.joint_values,
             )
             t_safety = time.time()
 
@@ -421,19 +422,6 @@ def inference_worker(
                 action = postprocessor(action)
                 t_send_start = time.time()
             conn.send(action)
-            t_send_end = time.time()
-
-            queue_len = len(policy._action_queue) if hasattr(policy, "_action_queue") else None
-            logger.warning(
-                "[Vlsa Inference] step breakdown: recv=%.3fs  preprocess=%.3fs  "
-                "select_action=%.3fs  postprocess=%.3fs  send=%.3fs  action_queue_len=%s",
-                t_recv_end - t_recv_start,
-                t_select_start - t_prep_start,
-                t_post_start - t_select_start,
-                t_send_start - t_post_start,
-                t_send_end - t_send_start,
-                queue_len,
-            )
     except Exception as e:
         logger.exception(f"[Vlsa Inference] Exception in inference worker: {e}")
 

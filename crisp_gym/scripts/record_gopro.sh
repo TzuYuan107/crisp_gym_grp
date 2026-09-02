@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # replace with your dataset repo id
-REPO_ID=cbrian/testgopro23
+REPO_ID=cbrian/test_gopro_final0000
 # replace with how many episodes to record
 NUM_EPISODES=10
 
@@ -12,4 +12,5 @@ python crisp_gym/scripts/record_gopro.py \
     --repo-id "$REPO_ID" \
     --tasks "put the sponge into the basket" \
     --num-episodes "$NUM_EPISODES" \
-    --recording-manager-type "ros"
+    --recording-manager-type "ros" \
+    --fps 20

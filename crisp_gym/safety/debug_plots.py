@@ -174,80 +174,66 @@ def plot_episode_debug(
     fig = plt.figure(figsize=(9, 8))
     ax = fig.add_subplot(111, projection="3d")
 
-    if len(obstacle_points) > 0:
-        ax.scatter(*obstacle_points.T, s=3, c="gray", alpha=0.4, label="obstacle point cloud")
-
-    ex, ey, ez = _ellipsoid_surface(ellipsoid_center, ellipsoid_rotation, ellipsoid_semi_axes)
-    ax.plot_surface(ex, ey, ez, color="red", alpha=0.25, linewidth=0)
-
-    if gripper_center is not None:
-        gripper_points = _ellipsoid_point_cloud(gripper_center, gripper_rotation, gripper_semi_axes)
-        ax.scatter(
-            *gripper_points.T, s=3, c="green", alpha=0.5, label="gripper point cloud"
-        )
-
-    if len(trajectory_reference) > 1:
-        ax.plot(*trajectory_reference.T, color="tab:green", linewidth=2, label="original (unfiltered, cumulative)")
-        ax.scatter(*trajectory_reference[0].T, color="tab:green", marker="o", s=40)
+    # TRIMMED: only the safety-filtered ("modified", blue) trajectory is plotted -- obstacle/
+    # gripper point clouds, the ellipsoid surface, the unfiltered/comparison trajectories, and
+    # the per-step predicted/modified delta arrows were all removed per request.
     if len(trajectory_actual) > 1:
         ax.plot(*trajectory_actual.T, color="tab:blue", linewidth=2, label="modified (safety-filtered, drives h)")
         ax.scatter(*trajectory_actual[0].T, color="tab:blue", marker="o", s=40)
         ax.scatter(*trajectory_actual[-1].T, color="tab:blue", marker="^", s=60)
-    if trajectory_comparison is not None and len(trajectory_comparison) > 1:
-        ax.plot(*trajectory_comparison.T, color="magenta", linewidth=1.5, linestyle="--", label="second pose (comparison only)")
-        if trajectory_comparison_collision is not None and len(trajectory_comparison_collision) == len(trajectory_comparison):
-            hit = np.asarray(trajectory_comparison_collision, dtype=bool)
-            if hit.any():
-                ax.scatter(
-                    *trajectory_comparison[hit].T, color="gold", marker="*", s=180,
-                    edgecolors="black", linewidths=0.5, label="comparison pose collides here", zorder=5,
-                )
-
-    have_predicted = trajectory_predicted is not None and len(trajectory_predicted) > 0
-    have_modified = trajectory_modified is not None and len(trajectory_modified) > 0
-    if have_predicted or have_modified:
-        n = len(trajectory_actual) - 1
-        if have_predicted:
-            n = min(n, len(trajectory_predicted))
-        if have_modified:
-            n = min(n, len(trajectory_modified))
-        bases = trajectory_actual[1 : 1 + n]
-        pred_deltas = trajectory_predicted[:n] - bases if have_predicted else np.zeros((0, 3))
-        mod_deltas = trajectory_modified[:n] - bases if have_modified else np.zeros((0, 3))
-        scale = _arrow_visibility_scale(trajectory_actual, pred_deltas, mod_deltas)
-        # Nudge the two arrow sets apart perpendicular to their average direction -- most steps
-        # have zero correction (predicted == modified), so without this, whichever is drawn
-        # second would fully hide the other wherever they coincide.
-        extent = float(np.max(trajectory_actual.max(axis=0) - trajectory_actual.min(axis=0)))
-        offset = _perpendicular_offset(pred_deltas, mod_deltas) * (0.04 * extent)
-        if have_predicted:
-            d = pred_deltas * scale
-            b = bases + offset
-            ax.quiver(
-                b[:, 0], b[:, 1], b[:, 2],
-                d[:, 0], d[:, 1], d[:, 2],
-                color="purple", alpha=0.8, arrow_length_ratio=0.3, linewidth=1.2,
-                label="predicted (unfiltered) one-step delta",
-            )
-        if have_modified:
-            d = mod_deltas * scale
-            b = bases - offset
-            ax.quiver(
-                b[:, 0], b[:, 1], b[:, 2],
-                d[:, 0], d[:, 1], d[:, 2],
-                color="red", alpha=0.8, arrow_length_ratio=0.3, linewidth=1.2,
-                label="modified (corrected) one-step delta",
-            )
 
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
     ax.legend(loc="upper left")
 
+    # ADDED: matplotlib's 3D default camera (elev=30, azim=-60) put the trajectory running
+    # mostly diagonally across the view, hard to read. Rotating azim by +90 swaps which
+    # screen-direction the x/y axes point toward (x's on-screen position ~= where y used to be)
+    # without touching any of the plotted data -- just the viewing angle.
+    ax.view_init(elev=30, azim=-60)
+
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=150)
     plt.close(fig)
     logger.info("SafetyFilter: episode trajectory plot saved to %s", save_path)
+
+
+def plot_obstacle_pointcloud_debug(
+    obstacle_points: np.ndarray,
+    ellipsoid_center: np.ndarray | None,
+    ellipsoid_rotation: np.ndarray | None,
+    ellipsoid_semi_axes: np.ndarray | None,
+    save_path: Path,
+) -> None:
+    """Same figure layout/camera angle as `plot_episode_debug`, but for `debug_obstacle_pointcloud.py`
+    (no live trajectory there) -- just the obstacle point cloud and its fitted ellipsoid, if any.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig = plt.figure(figsize=(9, 8))
+    ax = fig.add_subplot(111, projection="3d")
+
+    if len(obstacle_points) > 0:
+        ax.scatter(*obstacle_points.T, s=3, c="gray", alpha=0.6, label="obstacle point cloud")
+
+    if ellipsoid_center is not None:
+        ex, ey, ez = _ellipsoid_surface(ellipsoid_center, ellipsoid_rotation, ellipsoid_semi_axes)
+        ax.plot_surface(ex, ey, ez, color="tab:blue", alpha=0.3, linewidth=0)
+
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.set_zlabel("z")
+    ax.legend(loc="upper left")
+    ax.view_init(elev=30, azim=-60)
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
+    logger.info("Obstacle point cloud plot saved to %s", save_path)
 
 
 def plot_episode_debug_interactive(

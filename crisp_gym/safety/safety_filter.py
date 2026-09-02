@@ -54,6 +54,7 @@ from crisp_gym.safety.math_utils import (
     crop_to_bounds,
     fit_ellipse_from_height_profile,
 )
+from crisp_gym.safety.panda_kinematics import clamp_to_joint_velocity_limits
 from crisp_gym.safety.perception import get_point_cloud, obstacle_detection
 
 logger = logging.getLogger(__name__)
@@ -195,6 +196,44 @@ class SafetyFilterConfig:
     """Radians/second. Default matches libfranka's published Cartesian rotational velocity
     limit for Panda/FR3; confirm against your actual robot/firmware if it's been reconfigured."""
 
+    # ============================================================================
+    # ADDED (not in aegis's original): jerk limiter on top of the velocity clamp above.
+    # ============================================================================
+    # The velocity clamp bounds how far the corrected delta can move in one tick, but says
+    # nothing about how much that delta is allowed to change *between* consecutive ticks -- the
+    # CBF-QP solves independently each step (no memory of the previous solution), so two
+    # otherwise-in-bounds corrections back to back can still swing sharply from one to the next.
+    # That swing is an acceleration, and torque scales with acceleration -- observed in practice
+    # as reflex trips at low-inertia wrist joints (5-7) whose collision-behavior torque
+    # thresholds are much tighter than the base joints', even while every individual step stayed
+    # within max_translational_velocity/max_rotational_velocity. This clamps
+    # `(delta - previous_delta) / dt`, applied after the velocity clamp above, every active step.
+    max_translational_acceleration: float = 5.0
+    """Meters/second^2. Not a published robot spec (unlike the velocity limits above) -- a
+    starting point to prevent sharp tick-to-tick swings in the corrected translation; tune down
+    if reflex trips persist, up if corrections feel too sluggish to track a fast obstacle."""
+    max_rotational_acceleration: float = 8.0
+    """Radians/second^2. Same caveat as max_translational_acceleration -- tune to your setup."""
+    # ============================================================================
+
+    # ============================================================================
+    # ADDED (not in aegis's original), OPTIONAL -- self-contained, safe to delete. See
+    # crisp_gym/safety/panda_kinematics.py's module docstring for the full rationale and exact
+    # removal steps. Disabled by default since it's new/unvalidated -- the Cartesian velocity/
+    # jerk clamps above still apply regardless of this setting.
+    # ============================================================================
+    enable_joint_velocity_limit: bool = False
+    """If True, additionally scales the corrected action down whenever it would drive a Panda
+    joint's *estimated* velocity (via panda_kinematics.panda_jacobian's analytic Jacobian,
+    evaluated at the live `joint_values` passed into `step()`) past
+    joint_velocity_margin_fraction times its published limit. Requires the caller to pass
+    `joint_values=` into `step()` -- if omitted while this is True, the clamp is skipped (logged)
+    rather than guessed at."""
+    joint_velocity_margin_fraction: float = 0.9
+    """Fraction of Panda's published per-joint velocity limits to clamp to, when
+    enable_joint_velocity_limit is True."""
+    # ============================================================================
+
     qp_v_weight: float = 1.0 / 25
     qp_omega_weight: float = 1.0 / 25
     qp_uz_weight: float = 1.0
@@ -297,6 +336,10 @@ class SafetyFilter:
         self.Q2_diag: np.ndarray | None = None
         self.z_fixed: np.ndarray | None = None
         self.obstacle_name: str | None = None
+        # Previous step's (post-clamp) translation/rotation delta, for the jerk limiter in
+        # `step()` -- None at episode start (nothing to compare the first delta against).
+        self._prev_translation_delta: np.ndarray | None = None
+        self._prev_rotation_delta: np.ndarray | None = None
         self.last_info = SafetyFilterStepInfo(active=False)
 
         # Per-episode debug artifacts (see `_finalize_episode_debug`).
@@ -571,6 +614,8 @@ class SafetyFilter:
 
         self._active = False
         self.last_info = SafetyFilterStepInfo(active=False)
+        self._prev_translation_delta = None
+        self._prev_rotation_delta = None
         if not self.config.enabled:
             return
 
@@ -659,6 +704,7 @@ class SafetyFilter:
         rot_dim: int,
         dt: float,
         comparison_pose: Pose | None = None,
+        joint_values: np.ndarray | None = None,
     ) -> np.ndarray:
         """Filter one `ManipulatorCartesianEnv` action through the CBF-QP.
 
@@ -685,6 +731,10 @@ class SafetyFilter:
                 *real* arm position would actually collide even while a different pose (like
                 `target_pose`) is the one driving corrections. Pass whichever pose you did *not*
                 pass as `ee_pose`.
+            joint_values: Optional (7,) current joint angles, radians (e.g.
+                `env.robot.joint_values`). Only used when
+                `SafetyFilterConfig.enable_joint_velocity_limit` is True -- see that field's
+                docstring. Ignored otherwise.
 
         Returns:
             A same-shape action with the translation and rotation components safety-corrected.
@@ -817,6 +867,69 @@ class SafetyFilter:
                 translation_clamped,
                 rotation_clamped,
             )
+
+        # ADDED: jerk limiter -- see `max_translational_acceleration`'s docstring above for why
+        # the velocity clamp alone isn't enough. None on the first active step of an episode
+        # (nothing yet to compare against); that first delta passes through unclamped, same as
+        # `_clamp_to_speed`'s own first-call convention elsewhere in this file.
+        if self._prev_translation_delta is None:
+            self._prev_translation_delta = translation_delta.copy()
+        if self._prev_rotation_delta is None:
+            self._prev_rotation_delta = rotation_delta.copy()
+
+        translation_diff, translation_jerk_clamped = self._clamp_to_speed(
+            translation_delta - self._prev_translation_delta,
+            self.config.max_translational_acceleration,
+            dt_physics,
+        )
+        rotation_diff, rotation_jerk_clamped = self._clamp_to_speed(
+            rotation_delta - self._prev_rotation_delta,
+            self.config.max_rotational_acceleration,
+            dt_physics,
+        )
+        translation_delta = self._prev_translation_delta + translation_diff
+        rotation_delta = self._prev_rotation_delta + rotation_diff
+        if translation_jerk_clamped or rotation_jerk_clamped:
+            logger.warning(
+                "SafetyFilter: corrected action changed too sharply from the previous step "
+                "(translation_jerk_clamped=%s, rotation_jerk_clamped=%s) -- capped to avoid a "
+                "wrist torque spike/Franka reflex trip.",
+                translation_jerk_clamped,
+                rotation_jerk_clamped,
+            )
+        self._prev_translation_delta = translation_delta.copy()
+        self._prev_rotation_delta = rotation_delta.copy()
+
+        # ============================================================================
+        # ADDED, OPTIONAL, self-contained -- see `enable_joint_velocity_limit`'s docstring above
+        # (SafetyFilterConfig) for what this does and exactly how to remove it if unwanted.
+        # ============================================================================
+        if self.config.enable_joint_velocity_limit:
+            if joint_values is None:
+                logger.warning(
+                    "SafetyFilter: enable_joint_velocity_limit=True but step() was called "
+                    "without joint_values -- skipping the joint-velocity clamp this step."
+                )
+            else:
+                translation_delta, rotation_delta, joint_vel_clamped = (
+                    clamp_to_joint_velocity_limits(
+                        translation_delta,
+                        rotation_delta,
+                        joint_values,
+                        dt_physics,
+                        margin_fraction=self.config.joint_velocity_margin_fraction,
+                    )
+                )
+                if joint_vel_clamped:
+                    logger.warning(
+                        "SafetyFilter: corrected action would have driven a Panda joint over "
+                        "its velocity limit (per the analytic Jacobian estimate) -- capped."
+                    )
+                # Keep the jerk limiter's own prev-delta state consistent with what was actually
+                # applied this step, not the pre-joint-clamp value.
+                self._prev_translation_delta = translation_delta.copy()
+                self._prev_rotation_delta = rotation_delta.copy()
+        # ============================================================================
 
         action_input = np.zeros(6 + len(gripper), dtype=action.dtype)
         action_input[:3] = translation_delta

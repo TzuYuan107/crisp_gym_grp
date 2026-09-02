@@ -46,7 +46,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from crisp_gym.safety.debug_plots import _ellipsoid_surface
+from crisp_gym.safety.debug_plots import _ellipsoid_surface, plot_obstacle_pointcloud_debug
 from crisp_gym.safety.depth_camera import SafetyRGBDCamera, SafetyRGBDCameraConfig
 from crisp_gym.safety.math_utils import (
     fit_ellipse,
@@ -427,6 +427,17 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out_path))
     logger.info("Saved interactive plot to %s -- open it in a browser.", out_path.resolve())
+
+    # ADDED: static PNG, same figure layout/camera angle as SafetyFilter's own trajectory.png
+    # (plot_episode_debug) -- no trajectory here since this script never drives the robot, just
+    # the final (kept-by-both) obstacle cloud and its blue height-profile ellipsoid.
+    plot_obstacle_pointcloud_debug(
+        final_points,
+        height_center,
+        height_rotation,
+        height_axes,
+        out_path.with_suffix(".png"),
+    )
 
     if annotated_path is not None and annotated_path.exists():
         import cv2

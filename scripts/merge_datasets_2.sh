@@ -7,21 +7,30 @@
 
 # List of source dataset repo IDs to merge (space-separated)
 DATASETS=(
-    "cbrian/task1_mode0_obst_SP15X6_item_B18X12_S10X13_dist_M19X8_R18X4_CO3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode0_obst_SP15X8_item_B18X12_S10X13_dist_M19X8_R18X4_CO3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode0_obst_SP5X8_item_B18X12_S10X13_dist_M19X8_R18X4_CO3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode0_obst_SP5X11_item_B18X12_S10X13_dist_M19X8_R18X4_CO3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode0_obst_SP5X12_item_B18X12_S10X13_dist_M19X8_R18X4_CO3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode1_obst_NONE_item_B18X12_S10X13_dist_CO19X8_R18X4_M3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode1.5_obst_NONE_item_B18X12_S10X13_dist_CO19X8_R18X4_M3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode2_obst_NONE_item_B18X12_S10X13_dist_CO19X8_R18X4_M3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode2.5_obst_NONE_item_B18X12_S10X13_dist_CO19X8_R18X4_M3X12_ST2X3_CA3X4_epi_10_1"
-    "cbrian/task1_mode3_obst_NONE_item_B18X12_S10X13_dist_CO19X8_R18X4_M3X12_ST2X3_CA3X4_epi_10_1"
-
+    "cbrian/task2_mode0_obst_NONE_item_D15X13_dist_W19X8_T18X4_R3X12_P2X3_B3X4_epi_10_1"
+    "cbrian/task2_mode0_obst_NONE_item_D15X13_dist_W19X8_T18X4_R3X12_P2X3_B3X4_epi_10_2"
+    "cbrian/task2_mode0_obst_NONE_item_D15X13_dist_W19X8_T18X4_R3X12_P2X3_B3X4_epi_10_3"
+    "cbrian/task2_mode0_obst_NONE_item_D15X13_dist_W19X8_T18X4_R3X12_P2X3_B3X4_epi_10_4"
+    "cbrian/task2_mode0_obst_NONE_item_D15X13_dist_W19X8_T18X4_R3X12_P2X3_B3X4_epi_10_5"
+    "cbrian/task2_mode1_obst_G10.5X6.5_item_D15X13_S10X13_dist_W19X8_R18X4_T3X12_B2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode2_obst_G10.5X6.5_item_D15X13_S10X13_dist_W19X8_P18X4_T3X12_B2X3_R3X4_epi_10_1"
+    "cbrian/task2_mode3_obst_G10.5X6.5_item_D15X13_S10X13_dist_W19X8_P18X4_T3X12_B2X3_R3X4_epi_10_1"
+    "cbrian/task2_mode2_obst_G12X5_item_D15X13_S10X13_dist_T19X8_B18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode2.5_obst_G12X5_item_D15X13_S10X13_dist_T19X8_B18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode3_obst_G12X5_item_D15X13_S10X13_dist_T19X8_B18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode2_obst_G12X7.5_item_D15X13_S10X13_dist_W19X8_P18X4_R3X12_B2X3_T3X4_epi_10_1"
+    "cbrian/task2_mode2.5_obst_G12X7.5_item_D15X13_S10X13_dist_W19X8_P18X4_R3X12_B2X3_T3X4_epi_10_1"
+    "cbrian/task2_mode3_obst_G12X7.5_item_D15X13_S10X13_dist_W19X8_P18X4_R3X12_B2X3_T3X4_epi_10_1"
+    "cbrian/task2_mode1_obst_G8X5_item_D15X13_S10X13_dist_B19X8_T18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode1.5_obst_G8X5_item_D15X13_S10X13_dist_B19X8_T18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode2_obst_G8X5_item_D15X13_S10X13_dist_B19X8_T18X4_R3X12_W2X3_P3X4_epi_10_1"
+    "cbrian/task2_mode1_obst_G8X7.5_item_D15X13_S10X13_dist_W19X8_R18X4_P3X12_T2X3_B3X4_epi_10_1"
+    "cbrian/task2_mode1.5_obst_G8X7.5_item_D15X13_S10X13_dist_W19X8_R18X4_P3X12_T2X3_B3X4_epi_10_1"
+    "cbrian/task2_mode2_obst_G8X7.5_item_D15X13_S10X13_dist_W19X8_R18X4_P3X12_T2X3_B3X4_epi_10_1"
 )
 
 # Output dataset repo ID
-OUTPUT_REPO="cbrian/merge_task1_DND_epi_100"
+OUTPUT_REPO="cbrian/merge_task2_UM_epi_200"
 
 # Whether to make the output repo public (true/false)
 PUBLIC="true"

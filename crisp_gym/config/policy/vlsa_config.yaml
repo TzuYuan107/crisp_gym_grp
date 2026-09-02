@@ -46,12 +46,45 @@ safety:
   # xyz_bounds: [[-1.5, 1.5], [-1.5, 1.5], [-1.0, 2.0]]
   groundingdino_config_path: "/home/cbrian/vlsa/vlsa-aegis/GroundingDINO/GroundingDINO_SwinT_OGC.py"
   groundingdino_checkpoint_path: "/home/cbrian/vlsa/vlsa-aegis/GroundingDINO/groundingdino_swint_ogc.pth"
+
+  #-----------------------------TASK 1----------------------------------------
   # obstacle_preference_list: ["yellow-purple gradient cans stand on white can"]
-  # obstacle_preference_list: ["two white top and yellow-purple gradient cans"]
-  obstacle_preference_list: ["the green can"]
+  # obstacle_preference_list: ["two yellow-purple gradient cans"]
+  # obstacle_preference_list: ["the green can"]
+  # obstacle_preference_list: ["blue bottle"]
   # obstacle_preference_list: ["glass bottle"]
   # obstacle_preference_list: ["red can"]
-  # obstacle_preference_list: ["can with yellow-purple gradient"]
+  obstacle_preference_list: ["can with yellow-purple gradient"]
+
+  ellipsoid_fixed_radius: 0.035
+
+  ellipsoid_center_x_offset: 0.025
+
+  ellipsoid_margin_fraction: 0.15
+  #----------------------------------------------------------------------------------------
+
+  #-----------------------------TASK 2----------------------------------------
+  # obstacle_preference_list: ["green box"]
+  # obstacle_preference_list: ["two green box and and red purple bottom"]
+  # obstacle_preference_list: ["two green boxes"]
+  # obstacle_preference_list: ["red box"]
+  # ellipsoid_fixed_radius: 0.025
+
+  # obstacle_preference_list: ["green and white rectangular box with floral pattern"]
+  # ellipsoid_fixed_radius: 0.045
+  
+  # obstacle_preference_list: ["pot with black and grey strip"]
+
+  # obstacle_preference_list: ["teacup"]
+  # ellipsoid_fixed_radius: 0.035
+
+  # ellipsoid_center_x_offset: 0.025
+
+  # ellipsoid_margin_fraction: 0.25
+
+  #----------------------------------------------------------------------------------------
+
+
   perception_device: "cuda"
   # Per-episode obstacle_points.ply / trajectory.png / annotated_detection.jpg. Relative to
   # wherever you launch crisp-deploy-vla from (this repo's root, normally) -- matches the
@@ -65,7 +98,7 @@ safety:
   # matches what actually gets deployed. Since ellipsoid_fixed_radius is set below, this only
   # pads y and z (both measured from the point cloud) -- x is a fixed constant you already
   # chose, so fit_ellipse_from_height_profile deliberately leaves it unpadded.
-  ellipsoid_margin_fraction: 0.15
+  
 
   # --- MODIFIED: SafetyFilterConfig.ellipsoid_radius_percentile defaults to 100.0 (no
   # trimming). get_point_cloud's pixel-to-metric unprojection (crisp_gym/safety/perception.py)
@@ -87,14 +120,14 @@ safety:
   # diameter, i.e. 0.0325m radius) keeps the ellipsoid's shape consistent regardless of distance;
   # center position and height are still measured live each episode as before -- only the radius
   # stops being re-derived.
-  ellipsoid_fixed_radius: 0.04
+  
 
   # --- MODIFIED: SafetyFilterConfig.ellipsoid_center_x_offset defaults to 0.0 (no-op). Even
   # after sourcing the x/y center from the middle slice (ellipsoid_center_fraction) instead of
   # the top slice, the measured x-center was still off from the obstacle's real position by a
   # roughly constant amount -- likely residual camera_to_world calibration error. Subtracted
   # directly from the derived x-center as an empirical correction.
-  ellipsoid_center_x_offset: 0.025
+  
 
   # --- MODIFIED: SafetyFilterConfig.ellipsoid_height_percentile defaults to 100.0 (no trimming).
   # Tightened to 95 (matching debug_obstacle_pointcloud.py's own default) so a few stray extreme
@@ -114,6 +147,13 @@ safety:
   cbf_alpha: 10.0
   h_constraint: 0.02
   h_margin: 0.02
+
+  # --- ADDED: SafetyFilterConfig.enable_joint_velocity_limit defaults to False. Enabled here so
+  # the corrected action gets scaled down whenever it would drive a Panda joint's estimated
+  # velocity (via panda_kinematics.py's analytic Jacobian) past joint_velocity_margin_fraction of
+  # its published limit -- catches the joint 5/7 velocity-limit reflex trips that the Cartesian-
+  # space velocity/jerk clamps above can't, since those never account for joint-space limits.
+  enable_joint_velocity_limit: False
 
 # Only used when safety.mode == "point_cloud". All four topics must share the same pixel
 # grid (e.g. a RealSense stream aligned into the color frame). Matches the third-person

@@ -1,5 +1,5 @@
 control_frequency: 15.0
-gripper_mode: "absolute_binary"
+gripper_mode: "absolute_continuous"
 max_episode_steps: 1000
 
 # NOTE: These are the defaults anyway
@@ -30,7 +30,7 @@ gripper_config:
 camera_configs:
   - camera_name: "gopro"
     camera_frame: "gopro_link"
-    resolution: [256, 256]
+    resolution: [1080, 1920]
     camera_color_image_topic: "/gopro/image_raw"
     camera_color_info_topic: "/gopro/camera_info"
 
