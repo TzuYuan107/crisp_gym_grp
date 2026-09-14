@@ -1,9 +1,6 @@
 [workspace]
 preview = ["pixi-build"]
-authors = [
-    "Maximilian Dösch <doesch.maximilian@gmail.com>",
-    "Daniel San José Pro <42489409+danielsanjosepro@users.noreply.github.com>"
-]
+
 # Added pytorch and nvidia as secondary channels to help with binary discovery
 channels = ["conda-forge", "nvidia"]
 name = "crisp_gym"

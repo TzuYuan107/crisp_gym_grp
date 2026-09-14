@@ -55,7 +55,7 @@ from crisp_gym.safety.math_utils import (
     fit_ellipse_from_height_profile,
 )
 from crisp_gym.safety.panda_kinematics import clamp_to_joint_velocity_limits
-from crisp_gym.safety.perception import get_point_cloud, obstacle_detection
+from crisp_gym.safety.perception import get_point_cloud, get_point_clouds_per_box, obstacle_detection
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,26 @@ class SafetyFilterConfig:
     # amplified by the pixel-to-metric unprojection (see fit_ellipse_from_height_profile's
     # fixed_radius docstring) even though the obstacle's true size hasn't changed.
     ellipsoid_fixed_radius: float | None = None
+
+    # If True (only used when mode == "point_cloud"), `reset` keeps every GroundingDINO box
+    # matching the named obstacle separate (via `get_point_clouds_per_box`) instead of only the
+    # single highest-confidence one, and fits + tracks one ellipsoid CBF constraint per detected
+    # instance (e.g. two same-looking cans) instead of one. `step`'s QP then solves all of them
+    # simultaneously -- see `_Obstacle`/`step`'s constraint-building loop. Off by default: with
+    # this False, obstacle detection/fitting/the QP are byte-for-byte identical to before this
+    # setting existed (always exactly one obstacle), so existing configs/deployments are
+    # unaffected either way. Validated first in crisp_gym/scripts/debug_obstacle_pointcloud.py's
+    # own --multi-ellipsoid flag (a debug-only, perception-only preview of the same idea, no QP
+    # involved) before being wired into the real CBF here -- worth re-checking there on a new
+    # obstacle_preference_list/scene before trusting it live.
+    multi_obstacle: bool = False
+
+    # Debug-tool-only: crisp_gym/scripts/debug_obstacle_pointcloud.py's --multi-ellipsoid flag
+    # (--no-multi-ellipsoid overrides back off) defaults to this when neither is passed on the
+    # command line -- lets that script's default mode be set from this config instead of
+    # retyping the flag every run. Independent of `multi_obstacle` above: this only steers the
+    # debug tool's own default, not the deployed CBF.
+    debug_multi_ellipsoid: bool = False
 
     # Obstacle perception (only used when mode == "point_cloud").
     groundingdino_config_path: str | None = None
@@ -307,11 +327,34 @@ class SafetyFilterConfig:
 
 
 @dataclass
+class _Obstacle:
+    """One obstacle's CBF state: its fitted ellipsoid (p2/R2/Q2_diag, same layout as the
+    end-effector proxy's p1/R1/ee_shape_diag) plus its own independently evolving
+    separating-direction unit vector (z_fixed) -- see `compute_h_coeffs_3d`'s docstring for what
+    z_fixed represents. Each obstacle gets its own z_fixed because nothing ties two different
+    obstacles' separating directions together; the ego end-effector (`SafetyFilter.p1`/`R1`) is
+    the one body shared across every obstacle's CBF constraint in `step`.
+    """
+
+    p2: np.ndarray
+    R2: np.ndarray
+    Q2_diag: np.ndarray
+    z_fixed: np.ndarray
+
+
+@dataclass
 class SafetyFilterStepInfo:
     """Debug info produced by the most recent `SafetyFilter.step()` call."""
 
     active: bool
     h: float | None = None
+    """The most-binding (minimum) h across every active obstacle this step -- i.e. however many
+    obstacles there are, this is the single number that answers "how close is the current worst
+    case to a real CBF violation." See `h_per_obstacle` for the full per-obstacle breakdown."""
+    h_per_obstacle: list[float] | None = None
+    """One h value per obstacle in `SafetyFilter._obstacles`, same order. Length 1 whenever
+    `SafetyFilterConfig.multi_obstacle` is False (the default) or only one obstacle was detected/
+    fitted -- `h` above is then just that single value."""
     feasible: bool | None = None
     correction_norm: float | None = None
     dt: float | None = None
@@ -331,10 +374,7 @@ class SafetyFilter:
         self._groundingdino_model = None
         self.p1: np.ndarray | None = None
         self.R1: np.ndarray | None = None
-        self.p2: np.ndarray | None = None
-        self.R2: np.ndarray | None = None
-        self.Q2_diag: np.ndarray | None = None
-        self.z_fixed: np.ndarray | None = None
+        self._obstacles: list[_Obstacle] = []
         self.obstacle_name: str | None = None
         # Previous step's (post-clamp) translation/rotation delta, for the jerk limiter in
         # `step()` -- None at episode start (nothing to compare the first delta against).
@@ -345,6 +385,14 @@ class SafetyFilter:
         # Per-episode debug artifacts (see `_finalize_episode_debug`).
         self._episode_index = -1
         self._episode_points: np.ndarray | None = None
+        self._episode_colors: np.ndarray | None = None
+        # Only populated when `config.multi_obstacle` fitted more than one obstacle this episode
+        # -- `_episode_points`/`_episode_colors` above always alias index 0 (`_finalize_episode_
+        # debug` keeps saving those under the classic unsuffixed obstacle_points.ply/.npy
+        # filenames regardless of multi_obstacle, for backward compatibility with e.g.
+        # combine_safety_paths.py); indices 1+ get their own `obstacle_points_{i}.ply`/.npy.
+        self._episode_points_list: list[np.ndarray] = []
+        self._episode_colors_list: list[np.ndarray | None] = []
         self._trajectory_actual: list[np.ndarray] = []
         self._trajectory_reference: list[np.ndarray] = []
         self._trajectory_predicted: list[np.ndarray] = []
@@ -397,15 +445,9 @@ class SafetyFilter:
             )
         return self._groundingdino_model
 
-    def _localize_obstacle(
-        self,
-        task_description: str,
-        rgb: np.ndarray,
-        depth: np.ndarray,
-        camera_intrinsics: np.ndarray,
-        camera_to_world: np.ndarray,
-    ) -> np.ndarray:
-        """Run the aegis perception pipeline: name obstacle -> GroundingDINO -> depth -> crop.
+    def _name_obstacle(self, task_description: str, rgb: np.ndarray) -> str:
+        """Resolve `self.obstacle_name` for this episode -- fixed name or VLM naming, shared by
+        `_localize_obstacle` and `_localize_obstacles_multi`.
 
         If `config.obstacle_preference_list` has exactly one entry, that name is used directly
         as the GroundingDINO prompt and the VLM naming step (`obstacle_detection`, which needs
@@ -427,23 +469,74 @@ class SafetyFilter:
                 api_key=self.config.zhipu_api_key,
             )
             logger.info("SafetyFilter: VLM identified likely obstacle as '%s'.", self.obstacle_name)
+        return self.obstacle_name
 
+    def _localize_obstacle(
+        self,
+        task_description: str,
+        rgb: np.ndarray,
+        depth: np.ndarray,
+        camera_intrinsics: np.ndarray,
+        camera_to_world: np.ndarray,
+    ) -> np.ndarray:
+        """Run the aegis perception pipeline: name obstacle -> GroundingDINO -> depth -> crop.
+
+        Used when `config.multi_obstacle` is False (the default) -- see `_localize_obstacles_multi`
+        for the one-ellipsoid-per-detected-instance alternative.
+        """
+        obstacle_name = self._name_obstacle(task_description, rgb)
         model = self._ensure_groundingdino_model()
-        raw_points = get_point_cloud(
+        raw_points, raw_colors = get_point_cloud(
             rgb,
             depth,
             camera_intrinsics,
             camera_to_world,
-            self.obstacle_name,
+            obstacle_name,
+            model,
+            box_threshold=self.config.box_threshold,
+            text_threshold=self.config.text_threshold,
+            device=self.config.perception_device,
+            debug_dir=self._episode_debug_dir(),
+            return_colors=True,
+        )
+        cropped, cropped_colors = crop_to_bounds(raw_points, self.config.xyz_bounds, colors=raw_colors)
+        self._episode_points = cropped
+        self._episode_colors = cropped_colors
+        return cropped
+
+    def _localize_obstacles_multi(
+        self,
+        task_description: str,
+        rgb: np.ndarray,
+        depth: np.ndarray,
+        camera_intrinsics: np.ndarray,
+        camera_to_world: np.ndarray,
+    ) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Like `_localize_obstacle`, but keeps every GroundingDINO box matching the named
+        obstacle separate instead of only the single highest-confidence one -- one
+        (cropped_points, cropped_colors) pair per detected instance (e.g. two same-looking
+        cans), for `config.multi_obstacle`'s per-obstacle ellipsoid fit in `reset`. Same
+        perception primitives as the debug tool's own `--multi-ellipsoid` path
+        (`get_point_clouds_per_box`), just fed into the real CBF instead of a preview plot.
+        """
+        obstacle_name = self._name_obstacle(task_description, rgb)
+        model = self._ensure_groundingdino_model()
+        box_clouds = get_point_clouds_per_box(
+            rgb,
+            depth,
+            camera_intrinsics,
+            camera_to_world,
+            obstacle_name,
             model,
             box_threshold=self.config.box_threshold,
             text_threshold=self.config.text_threshold,
             device=self.config.perception_device,
             debug_dir=self._episode_debug_dir(),
         )
-        cropped = crop_to_bounds(raw_points, self.config.xyz_bounds)
-        self._episode_points = cropped
-        return cropped
+        return [
+            crop_to_bounds(raw_points, self.config.xyz_bounds, colors=raw_colors)
+            for raw_points, raw_colors in box_clouds
+        ]
 
     def _episode_debug_dir(self) -> Path | None:
         if not self.config.debug_dir:
@@ -483,7 +576,7 @@ class SafetyFilter:
                     ["step"]
                     + [f"original_{n}" for n in names]
                     + [f"modified_{n}" for n in names]
-                    + ["h", "feasible", "correction_norm", "dt"]
+                    + ["h", "feasible", "correction_norm", "dt", "h_per_obstacle"]
                 )
             writer.writerow(
                 [self._step_index]
@@ -494,6 +587,7 @@ class SafetyFilter:
                     "" if info.feasible is None else info.feasible,
                     "" if info.correction_norm is None else f"{info.correction_norm:.6f}",
                     "" if info.dt is None else f"{info.dt:.6f}",
+                    "" if info.h_per_obstacle is None else ";".join(f"{v:.6f}" for v in info.h_per_obstacle),
                 ]
             )
 
@@ -513,9 +607,15 @@ class SafetyFilter:
         # every point fell outside xyz_bounds that episode -- save_point_cloud's min/max would
         # crash on that.
         have_points = self._episode_points is not None and len(self._episode_points) > 0
-        have_trajectory = self.p2 is not None and len(self._trajectory_actual) > 1
+        have_trajectory = bool(self._obstacles) and len(self._trajectory_actual) > 1
         if not have_points and not have_trajectory:
             return
+
+        # Obstacles beyond index 0 (only ever populated when config.multi_obstacle fitted more
+        # than one this episode) -- saved/plotted in addition to, never instead of, the classic
+        # unsuffixed obstacle 0 files below, so e.g. combine_safety_paths.py keeps working
+        # unmodified regardless of multi_obstacle.
+        extra_obstacles = list(zip(self._obstacles[1:], self._episode_points_list[1:], self._episode_colors_list[1:])) if len(self._obstacles) > 1 else []
 
         debug_dir = self._episode_debug_dir()
         if debug_dir is None:
@@ -529,14 +629,46 @@ class SafetyFilter:
                 )
         else:
             if have_points:
-                save_point_cloud(self._episode_points, debug_dir / "obstacle_points.ply")
+                save_point_cloud(self._episode_points, debug_dir / "obstacle_points.ply", colors=self._episode_colors)
+                # Plain-numpy copy alongside the .ply so it can be loaded later without open3d
+                # when combining multiple episodes' point clouds into one plot. Colors saved
+                # separately (uint8 RGB, same row order/length as obstacle_points.npy) since
+                # they're optional -- e.g. still None on `mode="static"`, which never runs the
+                # perception pipeline that samples them.
+                np.save(debug_dir / "obstacle_points.npy", self._episode_points)
+                if self._episode_colors is not None:
+                    np.save(debug_dir / "obstacle_colors.npy", self._episode_colors)
+            if self._obstacles:
+                # Fitted obstacle ellipsoid, saved for the same reason -- otherwise it only ever
+                # existed in memory for one episode's plot.
+                np.savez(
+                    debug_dir / "ellipsoid.npz",
+                    center=self._obstacles[0].p2,
+                    rotation=self._obstacles[0].R2,
+                    semi_axes=np.array(self._obstacles[0].Q2_diag),
+                )
+            for i, (obstacle, extra_points, extra_colors) in enumerate(extra_obstacles, start=1):
+                if len(extra_points) > 0:
+                    save_point_cloud(extra_points, debug_dir / f"obstacle_points_{i}.ply", colors=extra_colors)
+                    np.save(debug_dir / f"obstacle_points_{i}.npy", extra_points)
+                    if extra_colors is not None:
+                        np.save(debug_dir / f"obstacle_colors_{i}.npy", extra_colors)
+                np.savez(
+                    debug_dir / f"ellipsoid_{i}.npz",
+                    center=obstacle.p2,
+                    rotation=obstacle.R2,
+                    semi_axes=np.array(obstacle.Q2_diag),
+                )
             if have_trajectory:
                 obstacle_points = self._episode_points if have_points else np.zeros((0, 3))
+                # Raw path data, saved alongside the rendered plots so multiple episodes' paths
+                # can later be loaded and combined into a single overlay plot.
+                np.save(debug_dir / "trajectory_actual.npy", np.array(self._trajectory_actual))
                 plot_episode_debug(
                     obstacle_points,
-                    self.p2,
-                    self.R2,
-                    self.Q2_diag,
+                    self._obstacles[0].p2,
+                    self._obstacles[0].R2,
+                    self._obstacles[0].Q2_diag,
                     np.array(self._trajectory_actual),
                     np.array(self._trajectory_reference),
                     debug_dir / "trajectory.png",
@@ -550,9 +682,9 @@ class SafetyFilter:
                 )
                 plot_episode_debug_interactive(
                     obstacle_points,
-                    self.p2,
-                    self.R2,
-                    self.Q2_diag,
+                    self._obstacles[0].p2,
+                    self._obstacles[0].R2,
+                    self._obstacles[0].Q2_diag,
                     np.array(self._trajectory_actual),
                     np.array(self._trajectory_reference),
                     debug_dir / "trajectory.html",
@@ -563,9 +695,16 @@ class SafetyFilter:
                     trajectory_modified=np.array(self._trajectory_modified),
                     trajectory_comparison=np.array(self._trajectory_comparison),
                     trajectory_comparison_collision=np.array(self._trajectory_comparison_collision),
+                    extra_obstacles=[
+                        (extra_points, obstacle.p2, obstacle.R2, obstacle.Q2_diag)
+                        for obstacle, extra_points, _ in extra_obstacles
+                    ],
                 )
 
         self._episode_points = None
+        self._episode_colors = None
+        self._episode_points_list = []
+        self._episode_colors_list = []
         self._trajectory_actual = []
         self._trajectory_predicted = []
         self._trajectory_modified = []
@@ -604,6 +743,7 @@ class SafetyFilter:
         self._finalize_episode_debug()
         self._episode_index += 1
         self._episode_points = None
+        self._episode_colors = None
         self._trajectory_actual = []
         self._trajectory_reference = []
         self._trajectory_predicted = []
@@ -620,11 +760,16 @@ class SafetyFilter:
             return
 
         self.p1, self.R1 = self._ee_ball_pose(ee_pose)
+        self._obstacles = []
+        self._episode_points_list = []
+        self._episode_colors_list = []
 
         if self.config.mode == "static":
-            self.p2 = np.array(self.config.obstacle_position, dtype=float)
-            self.R2 = np.eye(3)
-            self.Q2_diag = np.array(self.config.obstacle_shape_diag, dtype=float)
+            fitted_obstacles = [(
+                np.array(self.config.obstacle_position, dtype=float),
+                np.eye(3),
+                np.array(self.config.obstacle_shape_diag, dtype=float),
+            )]
         else:
             missing = [
                 name
@@ -645,54 +790,101 @@ class SafetyFilter:
                 )
                 return
 
-            try:
-                obstacle_points = self._localize_obstacle(
-                    task_description, rgb, depth, camera_intrinsics, camera_to_world
-                )
-            except Exception:
-                logger.exception(
-                    "SafetyFilter(mode='point_cloud'): obstacle perception failed, disabling "
-                    "for this episode."
-                )
-                return
+            if self.config.multi_obstacle:
+                try:
+                    point_clouds = self._localize_obstacles_multi(
+                        task_description, rgb, depth, camera_intrinsics, camera_to_world
+                    )
+                except Exception:
+                    logger.exception(
+                        "SafetyFilter(mode='point_cloud', multi_obstacle=True): obstacle "
+                        "perception failed, disabling for this episode."
+                    )
+                    return
+                if not point_clouds:
+                    logger.warning(
+                        "SafetyFilter(mode='point_cloud', multi_obstacle=True): no obstacle "
+                        "detected this episode. Safety filter is disabled for this episode."
+                    )
+                    return
+                # index 0's points/colors are also mirrored into the singular
+                # _episode_points/_episode_colors below (for the classic unsuffixed debug
+                # filenames) -- _episode_points_list/_episode_colors_list hold every obstacle,
+                # including 0, so _finalize_episode_debug can save indexed files for the rest.
+                self._episode_points_list = [pts for pts, _ in point_clouds]
+                self._episode_colors_list = [colors for _, colors in point_clouds]
+                self._episode_points, self._episode_colors = point_clouds[0]
+            else:
+                try:
+                    obstacle_points = self._localize_obstacle(
+                        task_description, rgb, depth, camera_intrinsics, camera_to_world
+                    )
+                except Exception:
+                    logger.exception(
+                        "SafetyFilter(mode='point_cloud'): obstacle perception failed, disabling "
+                        "for this episode."
+                    )
+                    return
+                point_clouds = [(obstacle_points, self._episode_colors)]
 
-            if len(obstacle_points) < 4:
+            fitted_obstacles = []
+            for i, (obstacle_points, _) in enumerate(point_clouds):
+                if len(obstacle_points) < 4:
+                    logger.warning(
+                        "SafetyFilter(mode='point_cloud'): obstacle %d has only %d points after "
+                        "the xyz_bounds crop (need >= 4 for an ellipsoid fit) -- skipping it.",
+                        i,
+                        len(obstacle_points),
+                    )
+                    continue
+                try:
+                    fitted_obstacles.append(
+                        fit_ellipse_from_height_profile(
+                            obstacle_points,
+                            top_fraction=self.config.ellipsoid_top_fraction,
+                            center_fraction=self.config.ellipsoid_center_fraction,
+                            min_top_points=self.config.ellipsoid_min_top_points,
+                            radius_percentile=self.config.ellipsoid_radius_percentile,
+                            height_percentile=self.config.ellipsoid_height_percentile,
+                            margin_fraction=self.config.ellipsoid_margin_fraction,
+                            full_cluster_eps=self.config.ellipsoid_full_cluster_eps,
+                            full_cluster_min_points=self.config.ellipsoid_full_cluster_min_points,
+                            top_cluster_eps=self.config.ellipsoid_top_cluster_eps,
+                            top_cluster_min_points=self.config.ellipsoid_top_cluster_min_points,
+                            fixed_radius=self.config.ellipsoid_fixed_radius,
+                            center_x_offset=self.config.ellipsoid_center_x_offset,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "SafetyFilter(mode='point_cloud'): ellipsoid fit failed for obstacle %d, "
+                        "skipping it.",
+                        i,
+                    )
+
+            if not fitted_obstacles:
                 logger.warning(
-                    "SafetyFilter(mode='point_cloud'): only %d obstacle points survived the "
-                    "xyz_bounds crop (need >= 4 for an ellipsoid fit). Safety filter is "
-                    "disabled for this episode.",
-                    len(obstacle_points),
-                )
-                return
-            try:
-                self.p2, self.R2, self.Q2_diag = fit_ellipse_from_height_profile(
-                    obstacle_points,
-                    top_fraction=self.config.ellipsoid_top_fraction,
-                    center_fraction=self.config.ellipsoid_center_fraction,
-                    min_top_points=self.config.ellipsoid_min_top_points,
-                    radius_percentile=self.config.ellipsoid_radius_percentile,
-                    height_percentile=self.config.ellipsoid_height_percentile,
-                    margin_fraction=self.config.ellipsoid_margin_fraction,
-                    full_cluster_eps=self.config.ellipsoid_full_cluster_eps,
-                    full_cluster_min_points=self.config.ellipsoid_full_cluster_min_points,
-                    top_cluster_eps=self.config.ellipsoid_top_cluster_eps,
-                    top_cluster_min_points=self.config.ellipsoid_top_cluster_min_points,
-                    fixed_radius=self.config.ellipsoid_fixed_radius,
-                    center_x_offset=self.config.ellipsoid_center_x_offset,
-                )
-            except Exception:
-                logger.exception(
-                    "SafetyFilter(mode='point_cloud'): ellipsoid fit failed, disabling for "
-                    "this episode."
+                    "SafetyFilter(mode='point_cloud'): no obstacle ellipsoid could be fitted "
+                    "this episode. Safety filter is disabled for this episode."
                 )
                 return
 
-        z0 = self.p2 - self.p1
-        norm = np.linalg.norm(z0)
-        if norm < 1e-9:
-            logger.warning("SafetyFilter: end-effector starts on top of the obstacle center; disabling.")
+        for p2, R2, Q2_diag in fitted_obstacles:
+            z0 = p2 - self.p1
+            norm = np.linalg.norm(z0)
+            if norm < 1e-9:
+                logger.warning(
+                    "SafetyFilter: end-effector starts on top of an obstacle center (%s) -- "
+                    "skipping that obstacle.",
+                    np.array2string(p2, precision=3),
+                )
+                continue
+            self._obstacles.append(_Obstacle(p2=p2, R2=R2, Q2_diag=Q2_diag, z_fixed=z0 / norm))
+
+        if not self._obstacles:
+            logger.warning("SafetyFilter: no usable obstacle this episode; disabling.")
             return
-        self.z_fixed = z0 / norm
+
         self._trajectory_actual = [self.p1.copy()]
         self._trajectory_reference = [self.p1.copy()]
         self._active = True
@@ -767,7 +959,7 @@ class SafetyFilter:
             self.last_info = SafetyFilterStepInfo(active=False, dt=dt)
             self._log_step(action, action, self.last_info)
             if comparison_pose is not None:
-                # No obstacle ellipsoid (self.p2 etc.) exists yet this episode -- can't say.
+                # No obstacle ellipsoid (self._obstacles) exists yet this episode -- can't say.
                 self._trajectory_comparison_collision.append(False)
             return action
 
@@ -799,43 +991,61 @@ class SafetyFilter:
         u_v_ref = self.config.ref_gain * v_ref
         u_omega_ref = self.config.ref_gain * omega_ref
 
-        a_v, a_omega, a_uz, h, mu_row = compute_h_coeffs_3d(
-            p1,
-            np.array(self.config.ee_shape_diag),
-            R1,
-            self.p2,
-            self.Q2_diag,
-            self.R2,
-            self.z_fixed,
-        )
-        a_u_v = self.config.v_gain * a_v
-        a_u_omega = self.config.omega_gain * a_omega
+        # One CBF coefficient set per obstacle -- N==1 whenever config.multi_obstacle is False
+        # (the default) or only one obstacle was fitted, in which case everything below reduces
+        # exactly to the original single-obstacle math (same QP size, same constraint).
+        ee_shape_diag = np.array(self.config.ee_shape_diag)
+        n_obstacles = len(self._obstacles)
+        a_u_v_list, a_u_omega_list, a_uz_list, h_list, u_z_nom_list = [], [], [], [], []
+        for obstacle in self._obstacles:
+            a_v, a_omega, a_uz, h_k, mu_row = compute_h_coeffs_3d(
+                p1,
+                ee_shape_diag,
+                R1,
+                obstacle.p2,
+                obstacle.Q2_diag,
+                obstacle.R2,
+                obstacle.z_fixed,
+            )
+            a_u_v_list.append(self.config.v_gain * a_v)
+            a_u_omega_list.append(self.config.omega_gain * a_omega)
+            a_uz_list.append(a_uz)
+            h_list.append(h_k)
+            u_z_nom_list.append(self.config.z_gain * mu_row)
 
-        u_z_nom = self.config.z_gain * mu_row
-        u = cp.Variable(9)
+        u = cp.Variable(6 + 3 * n_obstacles)
         weights = np.array(
             [self.config.qp_v_weight] * 3
             + [self.config.qp_omega_weight] * 3
-            + [self.config.qp_uz_weight] * 3
+            + [self.config.qp_uz_weight] * 3 * n_obstacles
         )
         W = np.diag(weights)
-        u_ref_vec = np.hstack([u_v_ref, u_omega_ref, u_z_nom])
+        u_ref_vec = np.hstack([u_v_ref, u_omega_ref] + u_z_nom_list)
         objective = cp.Minimize(cp.quad_form(u - u_ref_vec, W))
+        # u_v/u_omega (the shared ego end-effector velocity, u[:6]) appear in every obstacle's
+        # constraint below; each obstacle's own u_z block (u[6+3k : 6+3k+3], its separating
+        # direction's own rate of change -- see `_Obstacle`) only appears in that obstacle's own
+        # constraint, since nothing ties two different obstacles' z's together. All N
+        # constraints are solved together in this one QP, so the correction respects every
+        # obstacle simultaneously rather than one at a time.
         constraints = [
-            # ADDED: was `... + self.config.cbf_alpha * h >= 0` -- see `h_margin`'s docstring
-            # above (SafetyFilterConfig) for why. Default h_margin=0.0 makes this identical to
-            # the original.
-            a_u_v @ u[:3] + a_u_omega @ u[3:6] + a_uz @ u[6:]
-            + self.config.cbf_alpha * (h - self.config.h_margin) >= self.config.h_constraint
+            # ADDED: was `... + self.config.cbf_alpha * h_list[k] >= 0` -- see `h_margin`'s
+            # docstring above (SafetyFilterConfig) for why. Default h_margin=0.0 makes this
+            # identical to the original.
+            a_u_v_list[k] @ u[:3] + a_u_omega_list[k] @ u[3:6]
+            + a_uz_list[k] @ u[6 + 3 * k : 6 + 3 * k + 3]
+            + self.config.cbf_alpha * (h_list[k] - self.config.h_margin) >= self.config.h_constraint
+            for k in range(n_obstacles)
         ]
         prob = cp.Problem(objective, constraints)
         prob.solve(solver=cp.OSQP)
 
         feasible = u.value is not None
         if feasible:
-            u_v, u_omega, u_z = u.value[:3], u.value[3:6], u.value[6:]
+            u_v, u_omega = u.value[:3], u.value[3:6]
+            u_z_list = [u.value[6 + 3 * k : 6 + 3 * k + 3] for k in range(n_obstacles)]
         else:
-            # This QP is a single linear inequality on an otherwise-unbounded 9-dim variable,
+            # This QP is N linear inequalities on an otherwise-unbounded (6+3N)-dim variable,
             # which is essentially always solvable in principle -- `feasible=False` here means
             # OSQP itself failed (numerical ill-conditioning), not "no safe action exists".
             # Passing the raw, CBF-uncertified action through would be the riskier choice
@@ -843,12 +1053,13 @@ class SafetyFilter:
             logger.warning("SafetyFilter: CBF-QP infeasible, freezing translation/rotation this step.")
             u_v = np.zeros(3)
             u_omega = np.zeros(3)
-            u_z = np.zeros(3)
+            u_z_list = [np.zeros(3) for _ in range(n_obstacles)]
 
         Id = np.eye(3)
-        dz = (Id - np.outer(self.z_fixed, self.z_fixed)) @ u_z
-        self.z_fixed = self.z_fixed + dz * dt_physics
-        self.z_fixed = self.z_fixed / np.linalg.norm(self.z_fixed)
+        for obstacle, u_z in zip(self._obstacles, u_z_list):
+            dz = (Id - np.outer(obstacle.z_fixed, obstacle.z_fixed)) @ u_z
+            obstacle.z_fixed = obstacle.z_fixed + dz * dt_physics
+            obstacle.z_fixed = obstacle.z_fixed / np.linalg.norm(obstacle.z_fixed)
 
         # aegis's `action_input = np.zeros(7); action_input[:3] = ...; action_input[3:6] = ...;
         # action_input[6] = ...` -- generalized to an arbitrary gripper width via `len(gripper)`
@@ -943,25 +1154,30 @@ class SafetyFilter:
 
         self.last_info = SafetyFilterStepInfo(
             active=True,
-            h=float(h),
+            h=float(min(h_list)),
+            h_per_obstacle=[float(h_k) for h_k in h_list],
             feasible=feasible,
             correction_norm=float(np.linalg.norm(action_input[:3] - translation_ref)),
             dt=dt,
         )
         if comparison_pose is not None:
             # Independent, read-only check: does comparison_pose's OWN position collide with
-            # the obstacle, regardless of what h/correction (computed from ee_pose above) says.
-            # Deliberately not reusing `h` -- that's ee_pose's violation status, not this pose's.
-            comparison_h = compute_h_ij(
-                comparison_p1,
-                np.array(self.config.ee_shape_diag),
-                comparison_R1,
-                self.p2,
-                self.Q2_diag,
-                self.R2,
-                self.z_fixed,
+            # ANY obstacle, regardless of what h/correction (computed from ee_pose above) says.
+            # Deliberately not reusing h_list -- those are ee_pose's violation status, not this
+            # pose's.
+            comparison_collision = any(
+                compute_h_ij(
+                    comparison_p1,
+                    ee_shape_diag,
+                    comparison_R1,
+                    obstacle.p2,
+                    obstacle.Q2_diag,
+                    obstacle.R2,
+                    obstacle.z_fixed,
+                ) < 0
+                for obstacle in self._obstacles
             )
-            self._trajectory_comparison_collision.append(comparison_h < 0)
+            self._trajectory_comparison_collision.append(comparison_collision)
 
         self._log_step(action, action_input, self.last_info)
         return action_input

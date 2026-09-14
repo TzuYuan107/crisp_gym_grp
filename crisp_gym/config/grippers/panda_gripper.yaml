@@ -2,5 +2,5 @@ joint_state_topic: gripper/joint_states
 open_close_state_topic: gripper/open_close_states
 position_command_topic: gripper/gripper_position_commands
 status_command_topic: gripper/gripper_status_commands
-max_value: 0.08
+max_value: 0.065
 min_value: 0.0

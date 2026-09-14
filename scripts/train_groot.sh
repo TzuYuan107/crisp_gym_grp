@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # replace with your dataset repo e.g. cbrian/pi05_test_dataset
-DATASET_REPO=cbrian/merge_task1_DND_epi_200
+DATASET_REPO=
 # replace with your output directory e.g. outputs/pi05_test_training
 # NOTE: Keep "outputs/" prefix, only change the folder name after it
 OUTPUT_DIR=outputs/training_pi05_task1_DND1_epi_200_step_20000_batch_32

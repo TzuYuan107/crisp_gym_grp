@@ -435,7 +435,7 @@ def main():
 
     if repo_id is None:
         repo_id_input = input(
-            "Please enter repo id (e.g. cbrian/dataset_picktheredscrew_cartesian): "
+            "Please enter repo id (e.g. user/dataset_picktheredscrew_cartesian): "
         ).strip()
         if not repo_id_input:
             raise ValueError("repo-id is required")

@@ -19,7 +19,7 @@ import pandas as pd
 
 def main():
     p = argparse.ArgumentParser(description="Replace task description for all episodes in a dataset")
-    p.add_argument("--repo-id", required=True, help="Source dataset repo id (e.g. cbrian/my_dataset)")
+    p.add_argument("--repo-id", required=True, help="Source dataset repo id")
     p.add_argument("--output-repo-id", required=True, help="Output local repo id (will be created under HF_LEROBOT_HOME)")
     p.add_argument("--task", required=True, help="New task description to set for every episode")
     p.add_argument("--force-overwrite", action="store_true", help="Overwrite output path if it exists locally")

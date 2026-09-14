@@ -49,12 +49,13 @@ import yaml
 from crisp_gym.safety.debug_plots import _ellipsoid_surface, plot_obstacle_pointcloud_debug
 from crisp_gym.safety.depth_camera import SafetyRGBDCamera, SafetyRGBDCameraConfig
 from crisp_gym.safety.math_utils import (
+    crop_to_bounds,
     fit_ellipse,
     fit_ellipse_from_height_profile,
     filter_points_by_color,
     filtering_points,
 )
-from crisp_gym.safety.perception import get_point_cloud, obstacle_detection
+from crisp_gym.safety.perception import get_point_cloud, get_point_clouds_per_box, obstacle_detection
 from crisp_gym.safety.safety_filter import SafetyFilter, SafetyFilterConfig
 from crisp_gym.util.setup_logger import setup_logging
 
@@ -80,6 +81,120 @@ def _geometry_kept_mask(raw_points: np.ndarray, geo_filtered_points: np.ndarray)
     tree = cKDTree(geo_filtered_points)
     dist, _ = tree.query(raw_points, k=1)
     return dist < 1e-6
+
+
+def _show_annotated_detection(annotated_path: Path | None, obstacle_name: str) -> None:
+    """Pop up the 2D GroundingDINO detection (all matched boxes, `get_point_cloud`/
+    `get_point_clouds_per_box` already saved it to disk) so you can see *what* it detected
+    without separately hunting down the file. Non-blocking -- stays open while the rest of the
+    script computes the 3D plot; closed later via a final `cv2.waitKey(0)`.
+    """
+    if annotated_path is None or not annotated_path.exists():
+        logger.warning("No annotated_detection.jpg found (debug_dir unset or detection failed) -- skipping display.")
+        return
+
+    import cv2
+
+    annotated = cv2.imread(str(annotated_path))
+    cv2.imshow(f"GroundingDINO detection: '{obstacle_name}' (press any key to close)", annotated)
+    cv2.waitKey(1)  # force the window to actually render now
+    logger.info("Showing detection box from %s (window stays open until the script finishes).", annotated_path)
+
+
+def _run_multi_ellipsoid(
+    rgb: np.ndarray,
+    depth: np.ndarray,
+    intrinsics: np.ndarray,
+    camera_to_world: np.ndarray,
+    obstacle_name: str,
+    model,
+    fc,
+    args: argparse.Namespace,
+    debug_dir: Path | None,
+    annotated_path: Path | None,
+    out_path: Path,
+) -> None:
+    """`--multi-ellipsoid` path: one point cloud + one fitted ellipsoid per GroundingDINO box
+    matching ``obstacle_name`` (e.g. two same-looking cans), instead of the single merged/best-
+    box cloud the rest of this script builds.
+
+    Builds each box's ellipsoid the same way the single-object path's own plotted (blue)
+    ellipsoid is built -- `fit_ellipse_from_height_profile` on an `xyz_bounds`-only crop -- not
+    `fit_ellipse`'s exact MVEE, which is a poor fit here: it must strictly contain every point,
+    so a single stray outlier (a reflection, background bleed at the crop edge, a noisy depth
+    return) fully dictates one axis length regardless of how tightly the rest of the cloud
+    clusters, and one-outlier accidents get more likely, not less, once there are several boxes.
+    """
+    box_clouds = get_point_clouds_per_box(
+        rgb,
+        depth,
+        intrinsics,
+        camera_to_world,
+        obstacle_name,
+        model,
+        box_threshold=fc.box_threshold,
+        text_threshold=fc.text_threshold,
+        device=fc.perception_device,
+        debug_dir=debug_dir,
+    )
+    logger.info("Got %d separate point cloud(s) for '%s'.", len(box_clouds), obstacle_name)
+    _show_annotated_detection(annotated_path, obstacle_name)
+
+    import plotly.graph_objects as go
+
+    palette = ["red", "blue", "green", "purple", "orange", "cyan"]
+    fig = go.Figure()
+    fitted = 0
+    for i, (raw_points, raw_colors) in enumerate(box_clouds):
+        cropped_points, cropped_colors = crop_to_bounds(raw_points, fc.xyz_bounds, colors=raw_colors)
+        logger.info("box %d: %d raw -> %d in xyz_bounds", i, len(raw_points), len(cropped_points))
+        if len(cropped_points) == 0:
+            logger.warning("box %d: no points survived the xyz_bounds crop -- skipping its ellipsoid.", i)
+            continue
+
+        center, rotation, semi_axes = fit_ellipse_from_height_profile(
+            cropped_points,
+            top_fraction=args.top_fraction,
+            center_fraction=args.center_fraction,
+            radius_percentile=args.radius_percentile,
+            height_percentile=args.height_percentile,
+            full_cluster_eps=args.full_cluster_eps,
+            full_cluster_min_points=args.full_cluster_min_points,
+            top_cluster_eps=args.top_cluster_eps,
+            top_cluster_min_points=args.top_cluster_min_points,
+            fixed_radius=args.fixed_radius,
+            center_x_offset=args.center_x_offset,
+            margin_fraction=args.margin_fraction,
+        )
+        logger.info("box %d height-profile ellipsoid center=%s semi_axes=%s", i, center, semi_axes)
+        color = palette[i % len(palette)]
+        fig.add_trace(
+            go.Scatter3d(
+                x=cropped_points[:, 0], y=cropped_points[:, 1], z=cropped_points[:, 2],
+                mode="markers",
+                marker=dict(size=3, color=_rgb_strings(cropped_colors), opacity=1.0, line=dict(width=0.5, color=color)),
+                name=f"obstacle {i} points ({len(cropped_points)} pts)",
+            )
+        )
+        ex, ey, ez = _ellipsoid_surface(center, rotation, semi_axes)
+        fig.add_trace(
+            go.Surface(
+                x=ex, y=ey, z=ez, colorscale=[[0, color], [1, color]], showscale=False, opacity=0.3,
+                name=f"obstacle {i} ellipsoid",
+            )
+        )
+        fitted += 1
+
+    fig.update_layout(
+        scene=dict(xaxis_title="x", yaxis_title="y", zaxis_title="z", aspectmode="data"),
+        legend=dict(x=0, y=1),
+        margin=dict(l=0, r=0, t=0, b=0),
+    )
+    fig.write_html(str(out_path))
+    logger.info(
+        "Saved interactive plot with %d fitted ellipsoid(s) to %s -- open it in a browser.",
+        fitted, out_path.resolve(),
+    )
 
 
 def main() -> None:
@@ -110,103 +225,130 @@ def main() -> None:
     parser.add_argument(
         "--top-fraction",
         type=float,
-        default=0.15,
+        default=None,
         help="Fraction of the height-profile ellipsoid's z-range (from the top) used to measure "
-        "its horizontal extent -- see fit_ellipse_from_height_profile.",
+        "its horizontal extent -- see fit_ellipse_from_height_profile. Defaults to --config's "
+        "safety.ellipsoid_top_fraction (class default 0.15) when not given.",
     )
     parser.add_argument(
         "--center-fraction",
         type=float,
-        default=0.15,
+        default=None,
         help="Fraction of the height-profile ellipsoid's z-range, centered on the object's "
         "vertical middle, used for the ellipsoid's x/y center instead of --top-fraction's slice "
         "(radius keeps using the top slice regardless) -- see fit_ellipse_from_height_profile's "
-        "center_fraction docstring.",
+        "center_fraction docstring. Defaults to --config's safety.ellipsoid_center_fraction "
+        "(class default 0.15) when not given.",
     )
     parser.add_argument(
         "--center-x-offset",
         type=float,
-        default=0.0,
+        default=None,
         help="Subtracted from the ellipsoid's x-center after --center-fraction has otherwise "
         "fully derived it -- an empirical correction for residual camera_to_world error. "
-        "Mirrors SafetyFilterConfig.ellipsoid_center_x_offset. 0.0 (no-op) unless you've "
-        "measured a specific offset for your setup.",
+        "Defaults to --config's safety.ellipsoid_center_x_offset (class default 0.0, a no-op) "
+        "when not given.",
     )
     parser.add_argument(
         "--radius-percentile",
         type=float,
-        default=98.0,
+        default=None,
         help="Percentile (not the true max) of the top slice's distances from its own centroid "
         "used as the height-profile ellipsoid's horizontal radius (when --fixed-radius isn't "
         "given). Also used (both ends: percentile and 100-percentile) to trim the y_range "
-        "measurement when --fixed-radius IS given. Was 100 (no trimming), then 90 -- loosened "
-        "back to 98 since 90 was cutting off too much of the real y-extent (each end trims "
-        "(100-percentile)%, so 90 trimmed ~20% of the true spread total). Lower it if stray "
-        "points are inflating the measurement; raise toward 100 if it's clipping real points.",
+        "measurement when --fixed-radius IS given. Lower it if stray points are inflating the "
+        "measurement; raise toward 100 if it's clipping real points. Defaults to --config's "
+        "safety.ellipsoid_radius_percentile (class default 100.0, no trimming) when not given.",
     )
     parser.add_argument(
         "--fixed-radius",
         type=float,
         default=None,
-        help="If given, switches from a circular cross-section (--radius-percentile's top-slice "
-        "measurement, shared by x and y) to two independent semi-axes: x ('thick') becomes this "
-        "fixed constant, y ('width') gets measured as a percentile-trimmed range from the "
-        "middle-slice point cloud (--radius-percentile trims both ends) instead. Mirrors "
-        "SafetyFilterConfig.ellipsoid_fixed_radius, e.g. for previewing a fixed-thickness "
-        "obstacle before setting that config value.",
+        help="If given (or set via --config's safety.ellipsoid_fixed_radius), switches from a "
+        "circular cross-section (--radius-percentile's top-slice measurement, shared by x and y) "
+        "to two independent semi-axes: x ('thick') becomes this fixed constant, y ('width') gets "
+        "measured as a percentile-trimmed range from the middle-slice point cloud "
+        "(--radius-percentile trims both ends) instead. None (the class default) on both leaves "
+        "it dynamic, measured fresh each run.",
     )
     parser.add_argument(
         "--margin-fraction",
         type=float,
-        default=0.15,
+        default=None,
         help="Extra padding applied after the above (0.15 = 15%% larger), so the ellipsoid "
         "comfortably contains the cloud rather than sitting exactly flush with it. Applied to "
         "all three semi-axes when --fixed-radius isn't given; when it is, x is left unpadded "
         "(it's a fixed constant you already chose, not something measured here) -- only y and z "
-        "get the margin. Mirrors SafetyFilterConfig.ellipsoid_margin_fraction.",
+        "get the margin. Defaults to --config's safety.ellipsoid_margin_fraction (class default "
+        "0.15) when not given.",
     )
     parser.add_argument(
         "--height-percentile",
         type=float,
-        default=95.0,
+        default=None,
         help="Same trimming, applied to the z-extent (height_percentile for the top, "
-        "100-height_percentile for the bottom) instead of the radius. Was 100, then 98 -- "
-        "tightened further to 95 to match SafetyFilterConfig.ellipsoid_height_percentile.",
+        "100-height_percentile for the bottom) instead of the radius. Defaults to --config's "
+        "safety.ellipsoid_height_percentile (class default 100.0, no trimming) when not given.",
     )
     parser.add_argument(
         "--full-cluster-eps",
         type=float,
-        default=0.02,
+        default=None,
         help="DBSCAN neighborhood radius (meters) used to cluster the whole cropped cloud before "
         "anything else -- only the largest cluster is kept, before z_max/the top slice are even "
         "computed. Without this, a disjoint noise streak taller than the real object can hijack "
         "z_max and drag the top slice away from the object entirely. See "
-        "fit_ellipse_from_height_profile's full_cluster_eps docstring.",
+        "fit_ellipse_from_height_profile's full_cluster_eps docstring. Defaults to --config's "
+        "safety.ellipsoid_full_cluster_eps (class default 0.02) when not given.",
     )
     parser.add_argument(
         "--full-cluster-min-points",
         type=int,
-        default=10,
+        default=None,
         help="DBSCAN minimum cluster size for --full-cluster-eps. If the cropped cloud has fewer "
-        "points than this, clustering is skipped.",
+        "points than this, clustering is skipped. Defaults to --config's "
+        "safety.ellipsoid_full_cluster_min_points (class default 10) when not given.",
     )
     parser.add_argument(
         "--top-cluster-eps",
         type=float,
-        default=0.02,
+        default=None,
         help="DBSCAN neighborhood radius (meters) used to cluster the top slice before measuring "
         "its radius -- only the top slice's largest cluster is kept. See "
-        "fit_ellipse_from_height_profile's top_cluster_eps docstring.",
+        "fit_ellipse_from_height_profile's top_cluster_eps docstring. Defaults to --config's "
+        "safety.ellipsoid_top_cluster_eps (class default 0.02) when not given.",
     )
     parser.add_argument(
         "--top-cluster-min-points",
         type=int,
-        default=10,
+        default=None,
         help="DBSCAN minimum cluster size for --top-cluster-eps. If the top slice has fewer "
-        "points than this, clustering is skipped.",
+        "points than this, clustering is skipped. Defaults to --config's "
+        "safety.ellipsoid_top_cluster_min_points (class default 10) when not given.",
     )
     parser.add_argument(
         "--timeout", type=float, default=10.0, help="Seconds to wait for the camera to become ready."
+    )
+    parser.add_argument(
+        "--merge-boxes",
+        action="store_true",
+        help="Union points from every GroundingDINO box matching the obstacle prompt (e.g. two "
+        "same-looking cans both matching 'yellow can') into one combined point cloud, instead "
+        "of only the single highest-confidence box. Off by default, matching deployed behavior. "
+        "Mutually exclusive with --multi-ellipsoid (which fits a separate ellipsoid per box "
+        "instead of merging them).",
+    )
+    parser.add_argument(
+        "--multi-ellipsoid",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Instead of one point cloud/ellipsoid, keep every GroundingDINO box matching the "
+        "obstacle prompt separate and fit its own height-profile ellipsoid (e.g. two same-"
+        "looking cans both matching 'yellow can' each get their own ellipsoid) -- one colored "
+        "point cloud + ellipsoid per box in the saved HTML plot, instead of the single-object "
+        "path's comparison traces and PNG export. Defaults to --config's "
+        "safety.debug_multi_ellipsoid (class default False) when neither this nor "
+        "--no-multi-ellipsoid is passed.",
     )
     args = parser.parse_args()
 
@@ -221,6 +363,34 @@ def main() -> None:
     # irrelevant here since `reset()`/`step()` are never called.
     safety_filter._episode_index = 0
     fc = safety_filter.config
+
+    # CLI flags left unset (None) fall back to the matching safety.ellipsoid_*/debug_* config
+    # field instead of a hardcoded script default, so --config alone keeps this tool's fit in
+    # sync with the deployed SafetyFilterConfig without having to retype every flag every run.
+    if args.top_fraction is None:
+        args.top_fraction = fc.ellipsoid_top_fraction
+    if args.center_fraction is None:
+        args.center_fraction = fc.ellipsoid_center_fraction
+    if args.center_x_offset is None:
+        args.center_x_offset = fc.ellipsoid_center_x_offset
+    if args.radius_percentile is None:
+        args.radius_percentile = fc.ellipsoid_radius_percentile
+    if args.fixed_radius is None:
+        args.fixed_radius = fc.ellipsoid_fixed_radius
+    if args.margin_fraction is None:
+        args.margin_fraction = fc.ellipsoid_margin_fraction
+    if args.height_percentile is None:
+        args.height_percentile = fc.ellipsoid_height_percentile
+    if args.full_cluster_eps is None:
+        args.full_cluster_eps = fc.ellipsoid_full_cluster_eps
+    if args.full_cluster_min_points is None:
+        args.full_cluster_min_points = fc.ellipsoid_full_cluster_min_points
+    if args.top_cluster_eps is None:
+        args.top_cluster_eps = fc.ellipsoid_top_cluster_eps
+    if args.top_cluster_min_points is None:
+        args.top_cluster_min_points = fc.ellipsoid_top_cluster_min_points
+    if args.multi_ellipsoid is None:
+        args.multi_ellipsoid = fc.debug_multi_ellipsoid
 
     depth_camera = None
     try:
@@ -265,6 +435,22 @@ def main() -> None:
 
     model = safety_filter._ensure_groundingdino_model()
     debug_dir = safety_filter._episode_debug_dir()
+    annotated_path = (debug_dir / "annotated_detection.jpg") if debug_dir else None
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.multi_ellipsoid:
+        _run_multi_ellipsoid(
+            rgb, depth, intrinsics, camera_to_world, obstacle_name, model, fc, args, debug_dir, annotated_path, out_path
+        )
+        if annotated_path is not None and annotated_path.exists():
+            import cv2
+
+            logger.info("Press any key in the detection-box window to close it and exit.")
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        return
+
     raw_points, raw_colors = get_point_cloud(
         rgb,
         depth,
@@ -277,22 +463,10 @@ def main() -> None:
         device=fc.perception_device,
         debug_dir=debug_dir,
         return_colors=True,
+        merge_boxes=args.merge_boxes,
     )
     logger.info("raw points (inside detection box, valid depth): %d", len(raw_points))
-
-    # ADDED: show the 2D GroundingDINO detection box that `get_point_cloud` already saved to
-    # disk, so you can see *what* it detected without separately hunting down the file.
-    annotated_path = (debug_dir / "annotated_detection.jpg") if debug_dir else None
-    if annotated_path is not None and annotated_path.exists():
-        import cv2
-
-        annotated = cv2.imread(str(annotated_path))
-        cv2.imshow(f"GroundingDINO detection: '{obstacle_name}' (press any key to close)", annotated)
-        cv2.waitKey(1)  # force the window to actually render now; stays open (non-blocking) while
-        # the rest of this script computes the 3D plot below -- closed at the very end.
-        logger.info("Showing detection box from %s (window stays open until the script finishes).", annotated_path)
-    else:
-        logger.warning("No annotated_detection.jpg found (debug_dir unset or detection failed) -- skipping display.")
+    _show_annotated_detection(annotated_path, obstacle_name)
 
     # Height-profile ellipsoid (experimental, comparison only): xyz_bounds crop ONLY --
     # deliberately skips both filtering_points's plane-removal/DBSCAN AND statistical outlier
@@ -423,8 +597,6 @@ def main() -> None:
         legend=dict(x=0, y=1),
         margin=dict(l=0, r=0, t=0, b=0),
     )
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out_path))
     logger.info("Saved interactive plot to %s -- open it in a browser.", out_path.resolve())
 

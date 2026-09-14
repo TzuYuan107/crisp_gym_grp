@@ -1,7 +1,7 @@
 import os
 from huggingface_hub import HfApi
 
-REPO_ID = "cbrian/policy_pi05_libero_env_SST_SP_WC1_TC1_dataset_MD1_ctrl_cartesian" 
+REPO_ID =  
 LOCAL_FOLDER_PATH = "/workspace/outputs/policy_pi05_libero_env_SST_SP_WC1_TC1_dataset_MD1_ctrl_cartesian/checkpoints/last/pretrained_model"  # Path to your trained policy folder
 
 def upload_policy():

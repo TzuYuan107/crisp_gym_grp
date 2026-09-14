@@ -37,51 +37,20 @@ DEFAULT_BOX_THRESHOLD = 0.35
 DEFAULT_TEXT_THRESHOLD = 0.25
 
 
-def get_point_cloud(
+def _detect_boxes(
     rgb: np.ndarray,
-    depth: np.ndarray,
-    camera_intrinsics: np.ndarray,
-    camera_to_world: np.ndarray,
     text_prompt: str,
     model: Any,
-    box_threshold: float = DEFAULT_BOX_THRESHOLD,
-    text_threshold: float = DEFAULT_TEXT_THRESHOLD,
-    device: str = "cuda",
-    debug_dir: Path | None = None,
-    return_colors: bool = False,
-) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    """Detect ``text_prompt`` in ``rgb`` with GroundingDINO and unproject its bounding box to 3D.
-
-    Args:
-        rgb: (H, W, 3) uint8 RGB image, right-side-up (e.g. straight from
-            `crisp_py.camera.Camera.current_image` / `env.get_obs()`).
-        depth: (H, W) metric depth map registered to ``rgb`` (meters).
-        camera_intrinsics: (3, 3) camera intrinsic matrix K.
-        camera_to_world: (4, 4) homogeneous transform from camera frame to the same world/base
-            frame as `crisp_py.robot.Robot.end_effector_pose`.
-        text_prompt: Open-vocabulary text prompt describing the obstacle to localize.
-        model: A loaded GroundingDINO model (see `groundingdino.util.inference.load_model`).
-        box_threshold: GroundingDINO box confidence threshold.
-        text_threshold: GroundingDINO text confidence threshold.
-        device: Torch device for GroundingDINO inference.
-        debug_dir: If given, save the annotated detection crop here for debugging.
-        return_colors: If True, also return each point's (uint8) RGB color, sampled from
-            ``rgb`` at its source pixel -- for visualization and `filter_points_by_color`
-            (`crisp_gym.safety.math_utils`); the safety filter itself never needs color, so
-            existing callers are unaffected by this being off by default.
-
-    Returns:
-        (N, 3) world-frame points inside the detected bounding box, empty if nothing detected.
-        If ``return_colors``, a ``(points, colors)`` tuple instead, ``colors`` being (N, 3) uint8
-        and empty (shape (0, 3)) alongside an empty ``points`` on every early-exit path.
-    """
+    box_threshold: float,
+    text_threshold: float,
+    device: str,
+    debug_dir: Path | None,
+):
+    """Run GroundingDINO on ``rgb`` for ``text_prompt``, saving the annotated detection to
+    ``debug_dir`` if given. Returns the raw ``(boxes, logits, phrases)`` from
+    ``groundingdino.util.inference.predict`` -- ``boxes`` may be empty (shape (0, 4))."""
     import cv2
-    import torch
-    from groundingdino.util.box_ops import box_cxcywh_to_xyxy
     from groundingdino.util.inference import annotate, load_image, predict
-
-    def _empty():
-        return (np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)) if return_colors else np.zeros((0, 3))
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_path = os.path.join(tmp_dir, "obstacle_detection_input.png")
@@ -103,29 +72,35 @@ def get_point_cloud(
             annotated = annotate(image_source=image_source, boxes=boxes, logits=logits, phrases=phrases)
             cv2.imwrite(str(debug_dir / "annotated_detection.jpg"), annotated)
 
-    if boxes.shape[0] == 0:
-        logger.warning("GroundingDINO detected no object matching '%s'.", text_prompt)
-        return _empty()
+    return boxes, logits, phrases
 
-    # GroundingDINO's `predict()` returns boxes in whatever raw order its internal queries
-    # happen to produce -- NOT sorted by confidence -- so when a prompt matches multiple
-    # candidates (e.g. several visually-similar cans), picking a fixed index picks an
-    # essentially arbitrary one of them, regardless of which actually scored highest. Explicitly
-    # take the highest-logit box instead.
-    best_idx = int(logits.argmax())
-    if boxes.shape[0] > 1:
-        logger.info(
-            "GroundingDINO matched %d candidates for '%s'; picked '%s' (logit=%.3f) over %s.",
-            boxes.shape[0], text_prompt, phrases[best_idx], float(logits[best_idx]),
-            [f"{p} ({float(l):.3f})" for i, (p, l) in enumerate(zip(phrases, logits)) if i != best_idx],
-        )
 
-    h, w, _ = rgb.shape
+def _to_pixel_boxes(boxes: Any, h: int, w: int) -> np.ndarray:
+    """GroundingDINO's normalized cxcywh boxes -> pixel-space xyxy int array, shape (N, 4)."""
+    import torch
+    from groundingdino.util.box_ops import box_cxcywh_to_xyxy
+
     boxes_xyxy = box_cxcywh_to_xyxy(boxes)
     size_tensor = torch.tensor([w, h, w, h], device=boxes.device)
-    pixel_boxes = boxes_xyxy * size_tensor
-    xmin, ymin, xmax, ymax = pixel_boxes[best_idx].cpu().numpy().astype(int)
+    return (boxes_xyxy * size_tensor).cpu().numpy().astype(int)
 
+
+def _unproject_pixel_box(
+    rgb: np.ndarray,
+    depth: np.ndarray,
+    camera_to_world: np.ndarray,
+    K_inv: np.ndarray,
+    u_full: np.ndarray,
+    v_full: np.ndarray,
+    pixel_box: np.ndarray,
+    text_prompt: str,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Unproject one pixel-space xyxy box's valid-depth pixels into world-frame (points, colors).
+
+    Returns None if the box is degenerate (empty crop) or has no valid depth returns.
+    """
+    h, w, _ = rgb.shape
+    xmin, ymin, xmax, ymax = pixel_box
     xmin, ymin = max(0, xmin), max(0, ymin)
     xmax, ymax = min(w, xmax), min(h, ymax)
 
@@ -133,9 +108,8 @@ def get_point_cloud(
     cropped_depth = depth[ymin:ymax, xmin:xmax]
     if cropped_rgb.size == 0:
         logger.warning("Invalid bounding box for '%s': [%d, %d, %d, %d]", text_prompt, xmin, ymin, xmax, ymax)
-        return _empty()
+        return None
 
-    v_full, u_full = np.indices((h, w))
     cropped_u = u_full[ymin:ymax, xmin:xmax].flatten()
     cropped_v = v_full[ymin:ymax, xmin:xmax].flatten()
     depth_flat = cropped_depth.flatten()
@@ -150,20 +124,231 @@ def get_point_cloud(
     valid = np.isfinite(depth_flat) & (depth_flat > 0.05)
     if not np.any(valid):
         logger.warning("No valid depth returns for '%s' inside its detection box.", text_prompt)
-        return _empty()
+        return None
     cropped_u = cropped_u[valid]
     cropped_v = cropped_v[valid]
     depth_flat = depth_flat[valid]
     colors_flat = colors_flat[valid]
 
-    K_inv = np.linalg.inv(camera_intrinsics)
     pixels_homo = np.stack([cropped_u, cropped_v, np.ones_like(cropped_u)], axis=0)
     points_cam = K_inv @ pixels_homo * depth_flat
-
     points_cam_homo = np.vstack([points_cam, np.ones_like(depth_flat)])
     points_world_homo = camera_to_world @ points_cam_homo
-    points = points_world_homo[:3, :].T
+    return points_world_homo[:3, :].T, colors_flat
+
+
+def get_point_cloud(
+    rgb: np.ndarray,
+    depth: np.ndarray,
+    camera_intrinsics: np.ndarray,
+    camera_to_world: np.ndarray,
+    text_prompt: str,
+    model: Any,
+    box_threshold: float = DEFAULT_BOX_THRESHOLD,
+    text_threshold: float = DEFAULT_TEXT_THRESHOLD,
+    device: str = "cuda",
+    debug_dir: Path | None = None,
+    return_colors: bool = False,
+    merge_boxes: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Detect ``text_prompt`` in ``rgb`` with GroundingDINO and unproject its bounding box to 3D.
+
+    Args:
+        rgb: (H, W, 3) uint8 RGB image, right-side-up (e.g. straight from
+            `crisp_py.camera.Camera.current_image` / `env.get_obs()`).
+        depth: (H, W) metric depth map registered to ``rgb`` (meters).
+        camera_intrinsics: (3, 3) camera intrinsic matrix K.
+        camera_to_world: (4, 4) homogeneous transform from camera frame to the same world/base
+            frame as `crisp_py.robot.Robot.end_effector_pose`.
+        text_prompt: Open-vocabulary text prompt describing the obstacle to localize.
+        model: A loaded GroundingDINO model (see `groundingdino.util.inference.load_model`).
+        box_threshold: GroundingDINO box confidence threshold.
+        text_threshold: GroundingDINO text confidence threshold.
+        device: Torch device for GroundingDINO inference.
+        debug_dir: If given, save the annotated detection crop here for debugging.
+        return_colors: If True, also return each point's (uint8) RGB color, sampled from
+            ``rgb`` at its source pixel -- for visualization and `filter_points_by_color`
+            (`crisp_gym.safety.math_utils`); the safety filter itself never needs color, so
+            existing callers are unaffected by this being off by default.
+        merge_boxes: If True, union the unprojected points from *every* box GroundingDINO
+            matched to ``text_prompt`` (e.g. two same-looking cans both matching "yellow can")
+            into one combined point cloud, instead of only the single highest-logit box.
+            Off by default so existing single-obstacle callers are unaffected. See
+            `get_point_clouds_per_box` instead if you want a separate point cloud (and
+            eventually a separate ellipsoid) per matched box rather than one merged cloud.
+
+    Returns:
+        (N, 3) world-frame points inside the detected bounding box(es), empty if nothing
+        detected. If ``return_colors``, a ``(points, colors)`` tuple instead, ``colors`` being
+        (N, 3) uint8 and empty (shape (0, 3)) alongside an empty ``points`` on every early-exit
+        path.
+    """
+
+    def _empty():
+        return (np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)) if return_colors else np.zeros((0, 3))
+
+    boxes, logits, phrases = _detect_boxes(rgb, text_prompt, model, box_threshold, text_threshold, device, debug_dir)
+    if boxes.shape[0] == 0:
+        logger.warning("GroundingDINO detected no object matching '%s'.", text_prompt)
+        return _empty()
+
+    # GroundingDINO's `predict()` returns boxes in whatever raw order its internal queries
+    # happen to produce -- NOT sorted by confidence -- so when a prompt matches multiple
+    # candidates (e.g. several visually-similar cans), picking a fixed index picks an
+    # essentially arbitrary one of them, regardless of which actually scored highest. Explicitly
+    # take the highest-logit box instead, unless merge_boxes is set, in which case every matched
+    # box contributes to one combined point cloud.
+    best_idx = int(logits.argmax())
+    if boxes.shape[0] > 1:
+        if merge_boxes:
+            logger.info(
+                "GroundingDINO matched %d candidates for '%s'; merging all of them: %s.",
+                boxes.shape[0], text_prompt,
+                [f"{p} ({float(l):.3f})" for p, l in zip(phrases, logits)],
+            )
+        else:
+            logger.info(
+                "GroundingDINO matched %d candidates for '%s'; picked '%s' (logit=%.3f) over %s.",
+                boxes.shape[0], text_prompt, phrases[best_idx], float(logits[best_idx]),
+                [f"{p} ({float(l):.3f})" for i, (p, l) in enumerate(zip(phrases, logits)) if i != best_idx],
+            )
+    selected_indices = range(boxes.shape[0]) if merge_boxes else [best_idx]
+
+    h, w, _ = rgb.shape
+    pixel_boxes = _to_pixel_boxes(boxes, h, w)
+    K_inv = np.linalg.inv(camera_intrinsics)
+    v_full, u_full = np.indices((h, w))
+
+    all_points = []
+    all_colors = []
+    for idx in selected_indices:
+        result = _unproject_pixel_box(rgb, depth, camera_to_world, K_inv, u_full, v_full, pixel_boxes[idx], text_prompt)
+        if result is None:
+            continue
+        pts, cols = result
+        all_points.append(pts)
+        all_colors.append(cols)
+
+    if not all_points:
+        return _empty()
+
+    points = np.concatenate(all_points, axis=0)
+    colors_flat = np.concatenate(all_colors, axis=0)
     return (points, colors_flat) if return_colors else points
+
+
+def _mask_out_boxes(rgb: np.ndarray, pixel_boxes: np.ndarray) -> None:
+    """Gray-fill every pixel-space xyxy box's region in `rgb`, in place.
+
+    Used between passes of `get_point_clouds_per_box`'s masked-reattempt loop so a re-run of
+    GroundingDINO on the same prompt can no longer re-detect what a previous pass already found.
+    """
+    h, w, _ = rgb.shape
+    for xmin, ymin, xmax, ymax in pixel_boxes:
+        xmin, ymin = max(0, int(xmin)), max(0, int(ymin))
+        xmax, ymax = min(w, int(xmax)), min(h, int(ymax))
+        rgb[ymin:ymax, xmin:xmax] = 128
+
+
+def get_point_clouds_per_box(
+    rgb: np.ndarray,
+    depth: np.ndarray,
+    camera_intrinsics: np.ndarray,
+    camera_to_world: np.ndarray,
+    text_prompt: str,
+    model: Any,
+    box_threshold: float = DEFAULT_BOX_THRESHOLD,
+    text_threshold: float = DEFAULT_TEXT_THRESHOLD,
+    device: str = "cuda",
+    debug_dir: Path | None = None,
+    max_passes: int = 3,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Like `get_point_cloud`, but keeps every matched GroundingDINO box separate instead of
+    merging or picking one -- one (points, colors) pair per detected instance (e.g. two
+    same-looking cans both matching "yellow can"), so each can get its own fitted ellipsoid.
+
+    GroundingDINO's `predict()` applies no top-K/NMS cap of its own -- every decoder query above
+    `box_threshold` is kept independently -- but the underlying model's queries still compete
+    with each other during inference, and it's trained mostly on one-salient-target-per-phrase
+    data. In practice this means a strong, close match can push a weaker, farther match's own
+    confidence below `box_threshold` even though nothing in this codebase capped it. To work
+    around that, this runs detection in up to `max_passes` rounds: after each round, every box
+    just found gets gray-filled out of a *working copy* of `rgb` (`_mask_out_boxes` -- never the
+    original, which is still what the actual point-cloud unprojection below reads from) before
+    the next round runs the same prompt again, so an already-found object can no longer dominate
+    the query competition and suppress a previously-missed one. Stops as soon as a round finds
+    nothing new.
+
+    Args, other than the ones below, are the same as `get_point_cloud`. There is no
+    `merge_boxes`/`return_colors` choice here -- colors are always included, one array per box.
+
+    Args:
+        max_passes: Maximum masked-reattempt rounds (>= 1). Higher catches more distinct
+            instances at the cost of one extra GroundingDINO forward pass each round that still
+            finds something new.
+
+    Returns:
+        A list of (points, colors) pairs, one per box GroundingDINO matched to ``text_prompt``
+        across every pass, that had at least one valid depth return (boxes without one are
+        skipped). Empty list if nothing matched.
+    """
+    h, w, _ = rgb.shape
+    working_rgb = rgb.copy()
+    all_boxes, all_logits, all_phrases = [], [], []
+
+    for pass_idx in range(max_passes):
+        boxes, logits, phrases = _detect_boxes(
+            working_rgb, text_prompt, model, box_threshold, text_threshold, device, debug_dir=None
+        )
+        if boxes.shape[0] == 0:
+            break
+        logger.info(
+            "get_point_clouds_per_box: pass %d matched %d new candidate(s) for '%s': %s.",
+            pass_idx, boxes.shape[0], text_prompt,
+            [f"{p} ({float(l):.3f})" for p, l in zip(phrases, logits)],
+        )
+        all_boxes.append(boxes)
+        all_logits.append(logits)
+        all_phrases.extend(phrases)
+        if pass_idx == max_passes - 1:
+            break
+        _mask_out_boxes(working_rgb, _to_pixel_boxes(boxes, h, w))
+
+    if not all_boxes:
+        logger.warning("GroundingDINO detected no object matching '%s'.", text_prompt)
+        return []
+
+    import torch
+
+    boxes = torch.cat(all_boxes, dim=0)
+    logits = torch.cat(all_logits, dim=0)
+    phrases = all_phrases
+    logger.info(
+        "GroundingDINO matched %d total candidate(s) for '%s' across %d masked-reattempt pass(es).",
+        boxes.shape[0], text_prompt, len(all_boxes),
+    )
+
+    if debug_dir is not None:
+        import cv2
+        from groundingdino.util.inference import annotate
+
+        debug_dir = Path(debug_dir)
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        # Annotated over the ORIGINAL (unmasked) rgb, not any pass's gray-filled working copy --
+        # this is purely a detection-avoidance trick, not something that should show up visually.
+        annotated = annotate(image_source=rgb, boxes=boxes, logits=logits, phrases=phrases)
+        cv2.imwrite(str(debug_dir / "annotated_detection.jpg"), annotated)
+
+    pixel_boxes = _to_pixel_boxes(boxes, h, w)
+    K_inv = np.linalg.inv(camera_intrinsics)
+    v_full, u_full = np.indices((h, w))
+
+    results = []
+    for idx in range(boxes.shape[0]):
+        result = _unproject_pixel_box(rgb, depth, camera_to_world, K_inv, u_full, v_full, pixel_boxes[idx], text_prompt)
+        if result is not None:
+            results.append(result)
+    return results
 
 
 def obstacle_detection(

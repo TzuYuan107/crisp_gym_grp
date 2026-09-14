@@ -191,12 +191,19 @@ def fit_ellipse(pts: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def crop_to_bounds(
     pts: np.ndarray,
     xyz_bounds: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
-) -> np.ndarray:
+    colors: np.ndarray | None = None,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Keep only points inside an axis-aligned ``((xmin,xmax),(ymin,ymax),(zmin,zmax))`` box.
 
     Factored out of `filtering_points` so callers that want just the region-of-interest crop
     -- without its statistical-outlier/RANSAC-plane/DBSCAN steps, e.g.
     `fit_ellipse_from_height_profile`'s intended input -- don't have to duplicate this.
+
+    Args:
+        colors: Optional (N, 3) array aligned 1:1 with `pts` (e.g. from
+            `get_point_cloud(..., return_colors=True)`) -- cropped with the same mask and
+            returned alongside the points as a `(points, colors)` tuple. If None (default),
+            returns just the cropped points, unchanged from before this parameter existed.
     """
     (xmin, xmax), (ymin, ymax), (zmin, zmax) = xyz_bounds
     keep = (
@@ -207,6 +214,8 @@ def crop_to_bounds(
         & (pts[:, 2] > zmin)
         & (pts[:, 2] < zmax)
     )
+    if colors is not None:
+        return pts[keep], colors[keep]
     return pts[keep]
 
 

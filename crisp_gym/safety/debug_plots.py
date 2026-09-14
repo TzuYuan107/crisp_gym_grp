@@ -12,8 +12,15 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def save_point_cloud(points: np.ndarray, path: Path) -> None:
-    """Save a point cloud to a .ply file and log a one-line summary (count/centroid/bbox)."""
+def save_point_cloud(points: np.ndarray, path: Path, colors: np.ndarray | None = None) -> None:
+    """Save a point cloud to a .ply file and log a one-line summary (count/centroid/bbox).
+
+    Args:
+        colors: Optional (N, 3) uint8 RGB, aligned 1:1 with `points` (e.g. from
+            `get_point_cloud(..., return_colors=True)`). If given, written as the .ply's
+            per-point color (open3d expects float in [0, 1], so this divides by 255). If None,
+            the .ply has no color data, same as before this parameter existed.
+    """
     centroid = points.mean(axis=0)
     bbox_min, bbox_max = points.min(axis=0), points.max(axis=0)
     logger.info(
@@ -29,6 +36,8 @@ def save_point_cloud(points: np.ndarray, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
+    if colors is not None:
+        pcd.colors = o3d.utility.Vector3dVector(colors.astype(np.float64) / 255.0)
     o3d.io.write_point_cloud(str(path), pcd)
     logger.info("SafetyFilter: obstacle point cloud saved to %s", path)
 
@@ -251,6 +260,7 @@ def plot_episode_debug_interactive(
     trajectory_modified: np.ndarray | None = None,
     trajectory_comparison: np.ndarray | None = None,
     trajectory_comparison_collision: np.ndarray | None = None,
+    extra_obstacles: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] | None = None,
 ) -> None:
     """Same content as `plot_episode_debug`, but as a standalone HTML you can rotate/zoom/pan.
 
@@ -282,6 +292,12 @@ def plot_episode_debug_interactive(
             where that pose's own, independently-computed `h` is negative -- see
             `plot_episode_debug`'s docstring for the full explanation. Rendered as star-standin
             (diamond) markers. If None, omitted.
+        extra_obstacles: Additional obstacles beyond the primary one above -- one
+            `(points, center, rotation, semi_axes)` tuple each, e.g. from
+            `SafetyFilterConfig.multi_obstacle` fitting more than one this episode. The primary
+            obstacle above is always red/gray as before; each extra obstacle gets its own color
+            from a fixed palette (cycling if there are more than the palette has). If None or
+            empty, the plot looks exactly as it did before this parameter existed.
     """
     import plotly.graph_objects as go
 
@@ -311,6 +327,31 @@ def plot_episode_debug_interactive(
             name="obstacle ellipsoid",
         )
     )
+
+    # Same per-index palette as debug_obstacle_pointcloud.py's --multi-ellipsoid preview, so a
+    # multi-obstacle episode's real trajectory plot reads consistently with the debug tool run
+    # used to validate it beforehand.
+    _EXTRA_OBSTACLE_PALETTE = ["blue", "green", "purple", "orange", "cyan"]
+    for i, (extra_points, extra_center, extra_rotation, extra_semi_axes) in enumerate(extra_obstacles or []):
+        color = _EXTRA_OBSTACLE_PALETTE[i % len(_EXTRA_OBSTACLE_PALETTE)]
+        if len(extra_points) > 0:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=extra_points[:, 0],
+                    y=extra_points[:, 1],
+                    z=extra_points[:, 2],
+                    mode="markers",
+                    marker=dict(size=2, color=color, opacity=0.4),
+                    name=f"obstacle {i + 1} point cloud",
+                )
+            )
+        ex2, ey2, ez2 = _ellipsoid_surface(extra_center, extra_rotation, extra_semi_axes)
+        fig.add_trace(
+            go.Surface(
+                x=ex2, y=ey2, z=ez2, colorscale=[[0, color], [1, color]], showscale=False, opacity=0.3,
+                name=f"obstacle {i + 1} ellipsoid",
+            )
+        )
 
     if gripper_center is not None:
         gripper_points = _ellipsoid_point_cloud(gripper_center, gripper_rotation, gripper_semi_axes)

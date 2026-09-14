@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# replace with your dataset repo e.g. cbrian/pi05_test_dataset
+# replace with your dataset repo e.g. username/pi05_test_dataset
 DATASET_REPO=username/dataset_repo_name
 # replace with your output directory e.g. outputs/pi05_test_training
 # NOTE: Keep "/workspace/outputs/" prefix, only change the folder name after it
 OUTPUT_DIR=/workspace/outputs/output_folder_name
 # replace with your job name e.g. pi05_test_job
 JOB_NAME=jobname
-# replace with your policy repo e.g. cbrian/pi05_test_trained_policy
+# replace with your policy repo e.g. username/pi05_test_trained_policy
 POLICY_REPO=username/policy_name
 
 STEPS=2000

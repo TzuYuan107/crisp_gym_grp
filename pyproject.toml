@@ -12,10 +12,7 @@ dependencies = [
     "rich>=14.0.0, <15",
     "cvxpy>=1.4,<2",
 ]
-authors = [
-    {name="Maximilian Dösch", email="doesch.maximilian@gmail.com"},
-    {name="Daniel San Jose Pro", email="sanjose.daniel@gmail.com"},
-]
+
 
 [project.scripts]
 crisp-deploy-policy = "crisp_gym.scripts.deploy_policy:main"

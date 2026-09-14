@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # replace with your dataset repo id
-REPO_ID=cbrian/test_gopro_final0000
+REPO_ID=username/test_gopro_final0000111111111
 # replace with how many episodes to record
 NUM_EPISODES=10
 

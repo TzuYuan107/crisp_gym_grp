@@ -54,21 +54,21 @@ safety:
   # obstacle_preference_list: ["blue bottle"]
   # obstacle_preference_list: ["glass bottle"]
   # obstacle_preference_list: ["red can"]
-  obstacle_preference_list: ["can with yellow-purple gradient"]
+  # obstacle_preference_list: ["can with yellow to purple gradient"]
 
-  ellipsoid_fixed_radius: 0.035
+  # ellipsoid_fixed_radius: 0.035
 
-  ellipsoid_center_x_offset: 0.025
+  # ellipsoid_center_x_offset: 0.025
 
-  ellipsoid_margin_fraction: 0.15
+  # ellipsoid_margin_fraction: 0.25
   #----------------------------------------------------------------------------------------
 
   #-----------------------------TASK 2----------------------------------------
-  # obstacle_preference_list: ["green box"]
+  obstacle_preference_list: ["green box"]
   # obstacle_preference_list: ["two green box and and red purple bottom"]
   # obstacle_preference_list: ["two green boxes"]
   # obstacle_preference_list: ["red box"]
-  # ellipsoid_fixed_radius: 0.025
+  ellipsoid_fixed_radius: 0.025
 
   # obstacle_preference_list: ["green and white rectangular box with floral pattern"]
   # ellipsoid_fixed_radius: 0.045
@@ -77,10 +77,14 @@ safety:
 
   # obstacle_preference_list: ["teacup"]
   # ellipsoid_fixed_radius: 0.035
+ 
+  # obstacle_preference_list: ["blue plastic bead sculpture"]
+  # ellipsoid_fixed_radius: 0.045
 
-  # ellipsoid_center_x_offset: 0.025
 
-  # ellipsoid_margin_fraction: 0.25
+  ellipsoid_center_x_offset: 0.015
+
+  ellipsoid_margin_fraction: 0.25
 
   #----------------------------------------------------------------------------------------
 
@@ -91,6 +95,20 @@ safety:
   # existing gitignored outputs/ convention (see .gitignore), instead of the previous
   # ~/crisp_gym_debug/ location.
   debug_dir: "outputs/safety"
+
+  # Debug-tool-only: sets crisp_gym/scripts/debug_obstacle_pointcloud.py's --multi-ellipsoid
+  # default (--no-multi-ellipsoid still overrides back off from the command line). No effect on
+  # SafetyFilter itself -- the deployed CBF only ever enforces a single obstacle ellipsoid.
+  debug_multi_ellipsoid: False
+
+  # Real deployed CBF, unlike debug_multi_ellipsoid above: when True, SafetyFilter.reset fits +
+  # tracks one ellipsoid CBF constraint per GroundingDINO box matching the named obstacle (e.g.
+  # two same-looking cans) instead of just the single highest-confidence one, and step's QP
+  # solves every one of them simultaneously. Off by default -- False keeps detection/fitting/the
+  # QP byte-for-byte identical to before this setting existed. Validate with
+  # debug_obstacle_pointcloud.py --multi-ellipsoid on this obstacle_preference_list/scene before
+  # flipping this to True near the real robot.
+  multi_obstacle: False
 
   # --- MODIFIED: SafetyFilterConfig.ellipsoid_margin_fraction's own class default is 0.15,
   # explicitly set here (matching it) for clarity/discoverability -- kept in sync with
@@ -153,7 +171,7 @@ safety:
   # velocity (via panda_kinematics.py's analytic Jacobian) past joint_velocity_margin_fraction of
   # its published limit -- catches the joint 5/7 velocity-limit reflex trips that the Cartesian-
   # space velocity/jerk clamps above can't, since those never account for joint-space limits.
-  enable_joint_velocity_limit: False
+  enable_joint_velocity_limit: True
 
 # Only used when safety.mode == "point_cloud". All four topics must share the same pixel
 # grid (e.g. a RealSense stream aligned into the color frame). Matches the third-person
