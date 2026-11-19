@@ -16,4 +16,9 @@ gripperaction_log.txt
 actions_log.txt 
 obs_log.txt
 merged_output/
+.cache/
+apptainer_outputs/
+.logs/
+*.sif
+logs/
 xxxxxxxxxxxxxxxxxxxxx
