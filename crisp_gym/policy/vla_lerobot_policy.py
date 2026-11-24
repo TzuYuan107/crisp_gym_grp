@@ -92,23 +92,23 @@ class VlaLerobotPolicy(Policy):
 
             obs_raw["observation.state"] = concatenate_state_features(obs_raw)
 
-            LOG_PATH_OBS = os.path.expanduser("~/crisp_gym_debug/crisp_gym_ITR/obs_log.txt")
-            # Inside your _fn():
-            with open(LOG_PATH_OBS, "a") as f:
-                obs_str = ",".join(map(str, obs_raw["observation.state"].flatten()))
-                f.write(f"{obs_str}\n")
-                f.flush()  # Force the OS to write to disk immediately
+            # LOG_PATH_OBS = os.path.expanduser("~/crisp_gym_debug/crisp_gym_ITR/obs_log.txt")
+            # # Inside your _fn():
+            # with open(LOG_PATH_OBS, "a") as f:
+            #     obs_str = ",".join(map(str, obs_raw["observation.state"].flatten()))
+            #     f.write(f"{obs_str}\n")
+            #     f.flush()  # Force the OS to write to disk immediately
 
             self.parent_conn.send(obs_raw)
             action: Action = self.parent_conn.recv().squeeze(0).to("cpu").numpy()
 
-            LOG_PATH = os.path.expanduser("~/crisp_gym_debug/crisp_gym_ITR/gripperaction_log.txt")
-            # Inside your _fn():
-            with open(LOG_PATH, "a") as f:
-                action_last = np.asarray(action).reshape(-1)[-1]
-                f.write(f"{action_last}\n")
-                f.flush()  # Force the OS to write to disk immediately
-            #logger.debug(f"Action: {action}")
+            # LOG_PATH = os.path.expanduser("~/crisp_gym_debug/crisp_gym_ITR/gripperaction_log.txt")
+            # # Inside your _fn():
+            # with open(LOG_PATH, "a") as f:
+            #     action_last = np.asarray(action).reshape(-1)[-1]
+            #     f.write(f"{action_last}\n")
+            #     f.flush()  # Force the OS to write to disk immediately
+            # #logger.debug(f"Action: {action}")
 
             try:
                 self.env.step(action, block=False)
