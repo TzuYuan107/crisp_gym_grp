@@ -33,6 +33,8 @@ import rerun as rr
 import torch
 import torch.utils.data
 import tqdm
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.utils.constants import ACTION, DONE, OBS_STATE, REWARD
 
 import crisp_gym  # noqa: F401
 from crisp_gym.config.home import HomeConfig
@@ -40,11 +42,10 @@ from crisp_gym.envs.manipulator_env import make_env
 from crisp_gym.envs.manipulator_env_config import list_env_configs
 from crisp_gym.util import prompt
 from crisp_gym.util.setup_logger import setup_logging
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.utils.constants import ACTION, DONE, OBS_STATE, REWARD
 
 
 def to_hwc_uint8_numpy(chw_float32_torch: torch.Tensor) -> np.ndarray:
+    """Convert a channel-first float image to channel-last uint8 pixels."""
     assert chw_float32_torch.dtype == torch.float32
     assert chw_float32_torch.ndim == 3
     c, h, w = chw_float32_torch.shape
@@ -57,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 
 def _to_numpy_1d(value) -> np.ndarray:  # noqa: ANN001
+    """Flatten a tensor or array into a one-dimensional float32 action."""
     if torch.is_tensor(value):
         value = value.detach().cpu().numpy()
     arr = np.asarray(value, dtype=np.float32)
@@ -85,8 +87,12 @@ def replay_dataset_on_robot(
     max_episodes: int | None = None,
     max_frames: int | None = None,
     display_compressed_images: bool = False,
-    **kwargs,
+    **kwargs: object,
 ) -> Path | None:
+    """Replay stored actions on a robot while logging observations to Rerun.
+
+    The unused keyword arguments are accepted for compatibility with existing callers.
+    """
     logging.info("Loading dataloader")
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -269,7 +275,8 @@ def replay_dataset_on_robot(
     return None
 
 
-def main():
+def main() -> None:
+    """Parse replay options and run the robot playback."""
     parser = argparse.ArgumentParser(description="Replay a LeRobotDataset on robot hardware")
 
     parser.add_argument(

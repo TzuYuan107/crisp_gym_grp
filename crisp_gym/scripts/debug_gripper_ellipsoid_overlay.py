@@ -1,4 +1,6 @@
-"""Debug tool: stream the third-person camera feed with the CBF's gripper ellipsoid overlaid,
+r"""Debug tool: overlay the CBF gripper ellipsoid on the third-person camera feed.
+
+Stream the third-person camera feed with the CBF's gripper ellipsoid overlaid,
 with live keyboard controls to nudge `camera_to_world` until it lines up with the real gripper.
 
 Projects the CBF safety filter's end-effector proxy ellipsoid onto the third-person camera's
@@ -90,6 +92,7 @@ class PoseTopicSubscriber:
     """
 
     def __init__(self, pose_topic: str):
+        """Subscribe to the read-only gripper pose topic."""
         if not rclpy.ok():
             rclpy.init()
         self.node = rclpy.create_node("debug_gripper_overlay_pose_sub")
@@ -115,10 +118,12 @@ class PoseTopicSubscriber:
 
     @property
     def latest_pose(self) -> Pose | None:
+        """Return the most recently received pose, if available."""
         with self._lock:
             return self._pose
 
     def wait_until_ready(self, timeout: float = 10.0) -> None:
+        """Wait for the first pose or raise if the timeout expires."""
         start = time.time()
         while self.latest_pose is None:
             if time.time() - start > timeout:
@@ -141,10 +146,13 @@ def _draw_closed_curve(
     img: np.ndarray, points_world: np.ndarray, world_to_camera: np.ndarray, intrinsics: np.ndarray,
     color: tuple[int, int, int], thickness: int = 2,
 ) -> None:
-    """Draw a closed polyline (e.g. one of the ellipsoid's great-ellipse surface curves) by
+    """Draw a closed polyline representing an ellipsoid surface curve.
+
+    For example, draw one of the ellipsoid's great-ellipse surface curves by
     connecting consecutive `points_world` rows, wrapping the last point back to the first.
     Segments with either endpoint behind the camera are skipped individually, rather than
-    dropping the whole curve, so the part of it that's actually visible still gets drawn."""
+    dropping the whole curve, so the part of it that's actually visible still gets drawn.
+    """
     points_homo = np.hstack([points_world, np.ones((len(points_world), 1))])
     points_cam = (world_to_camera @ points_homo.T).T[:, :3]
     in_front = points_cam[:, 2] > 1e-3
@@ -183,6 +191,7 @@ def _print_matrix(camera_to_world: np.ndarray, base_frame: str, camera_frame: st
 
 
 def main() -> None:
+    """Stream the camera feed and interactively adjust the overlay calibration."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--config",

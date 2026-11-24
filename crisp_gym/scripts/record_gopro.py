@@ -230,8 +230,6 @@ def main():
 
         def on_start():
             """Hook function to be called when starting a new episode."""
-            
-                
             env.robot.reset_targets()
             env.robot.home(blocking=False, home_config=HomeConfig.GOPRO.randomize(noise=args.home_config_noise))
             env.reset()

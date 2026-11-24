@@ -15,10 +15,10 @@ camera-info topics independently, and hands the frame to `SafetyFilter.reset()` 
 episode to run the full VLM + GroundingDINO + point-cloud pipeline.
 """
 
-import os
-
 import json
 import logging
+import multiprocessing as mp
+import os
 import time
 from multiprocessing import Pipe
 from multiprocessing.connection import Connection
@@ -26,11 +26,14 @@ from pathlib import Path
 from typing import Any, Callable, Tuple
 
 import numpy as np
-import multiprocessing as mp
 import torch
 import torch._inductor.config as inductor_config
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.policies.factory import LeRobotDatasetMetadata, get_policy_class, make_pre_post_processors
+from lerobot.policies.factory import (
+    LeRobotDatasetMetadata,
+    get_policy_class,
+    make_pre_post_processors,
+)
 from typing_extensions import override
 
 from crisp_gym.envs.manipulator_env import ManipulatorBaseEnv
@@ -119,7 +122,6 @@ class VlsaLerobotPolicy(Policy):
     @override
     def make_data_fn(self, task_description: str) -> Callable[[], Tuple[Observation, Action]]:  # noqa: ANN002, ANN003
         """Generate observation and action by communicating with the inference worker."""
-
         logger.info(f"Syncing task to worker: {task_description}")
         self.parent_conn.send(task_description)
 
@@ -387,9 +389,7 @@ def inference_worker(
             # cache hit vs miss: `n_action_steps - 1` (24) right after a fresh
             # predict_action_chunk call, decreasing by 1 each subsequent cache-hit call until it
             # empties and regenerates.
-            t_recv_start = time.time()
             msg = conn.recv()
-            t_recv_end = time.time()
             if msg is None:
                 break
             if msg == "reset":
@@ -404,23 +404,17 @@ def inference_worker(
                 continue
 
             with torch.inference_mode():
-                t_prep_start = time.time()
                 obs_with_task = numpy_obs_to_torch(msg)
                 obs_with_task["task"] = current_task
 
                 obs = preprocessor(obs_with_task)
-                t_select_start = time.time()
-
                 action = policy.select_action(obs)
                 if torch.cuda.is_available():
                     # select_action's own CUDA ops are asynchronous by default -- without this,
                     # wall-clock time here would just measure kernel-launch/dispatch, not actual
                     # GPU compute completion, understating the real cost.
                     torch.cuda.synchronize()
-                t_post_start = time.time()
-
                 action = postprocessor(action)
-                t_send_start = time.time()
             conn.send(action)
     except Exception as e:
         logger.exception(f"[Vlsa Inference] Exception in inference worker: {e}")

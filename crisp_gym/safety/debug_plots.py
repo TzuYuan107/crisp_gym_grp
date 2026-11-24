@@ -1,13 +1,18 @@
-"""Per-episode debug artifacts for `SafetyFilter`: obstacle point clouds and a 3D plot
-comparing the raw/unfiltered trajectory against the safety-filtered one actually executed.
+"""Create per-episode debug artifacts for `SafetyFilter`.
+
+These include obstacle point clouds and a 3D plot comparing the raw/unfiltered
+trajectory against the safety-filtered one actually executed.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +21,8 @@ def save_point_cloud(points: np.ndarray, path: Path, colors: np.ndarray | None =
     """Save a point cloud to a .ply file and log a one-line summary (count/centroid/bbox).
 
     Args:
+        points: (N, 3) obstacle coordinates in the robot base frame.
+        path: Destination PLY file path.
         colors: Optional (N, 3) uint8 RGB, aligned 1:1 with `points` (e.g. from
             `get_point_cloud(..., return_colors=True)`). If given, written as the .ply's
             per-point color (open3d expects float in [0, 1], so this divides by 255). If None,
@@ -215,8 +222,10 @@ def plot_obstacle_pointcloud_debug(
     ellipsoid_semi_axes: np.ndarray | None,
     save_path: Path,
 ) -> None:
-    """Same figure layout/camera angle as `plot_episode_debug`, but for `debug_obstacle_pointcloud.py`
-    (no live trajectory there) -- just the obstacle point cloud and its fitted ellipsoid, if any.
+    """Plot the obstacle cloud and fitted ellipsoid for the debug script.
+
+    Use the same layout/camera angle as `plot_episode_debug`, but show no live
+    trajectory -- just the obstacle point cloud and its fitted ellipsoid, if any.
     """
     import matplotlib
 
@@ -273,6 +282,13 @@ def plot_episode_debug_interactive(
     `plot_episode_debug`'s docstring for the same note.
 
     Args:
+        obstacle_points: (N, 3) points used to fit the obstacle.
+        ellipsoid_center: (3,) center of the primary ellipsoid.
+        ellipsoid_rotation: (3, 3) orientation of the primary ellipsoid.
+        ellipsoid_semi_axes: (3,) semi-axis lengths of the primary ellipsoid.
+        trajectory_actual: (T, 3) safety-filtered path.
+        trajectory_reference: (T, 3) unfiltered reference path.
+        save_path: Destination HTML file path.
         gripper_center: (3,) end-effector proxy ellipsoid center at episode end
             (`SafetyFilter.p1`). If None, the gripper point cloud is omitted.
         gripper_rotation: (3, 3) end-effector proxy ellipsoid orientation (`SafetyFilter.R1`).

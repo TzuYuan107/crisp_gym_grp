@@ -1,10 +1,14 @@
+"""Upload a locally trained policy checkpoint to the Hugging Face Hub."""
+
 import os
+
 from huggingface_hub import HfApi
 
 REPO_ID = "hf_username/model_repo_name"
 LOCAL_FOLDER_PATH = "/path/to/model-folder/checkpoints/last/pretrained_model"  # Path to your trained policy folder
 
 def upload_policy():
+    """Create the model repository if needed, then upload the checkpoint folder."""
     # --- Configuration ---
     # Replace with your HF username and desired repo name
     

@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import rclpy
@@ -26,9 +27,11 @@ import rclpy.executors
 import rclpy.time
 from cv_bridge import CvBridge
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+
+if TYPE_CHECKING:
+    from rclpy.node import Node
 
 logger = logging.getLogger(__name__)
 

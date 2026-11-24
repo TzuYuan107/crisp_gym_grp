@@ -45,10 +45,13 @@ def _detect_boxes(
     text_threshold: float,
     device: str,
     debug_dir: Path | None,
-):
-    """Run GroundingDINO on ``rgb`` for ``text_prompt``, saving the annotated detection to
-    ``debug_dir`` if given. Returns the raw ``(boxes, logits, phrases)`` from
-    ``groundingdino.util.inference.predict`` -- ``boxes`` may be empty (shape (0, 4))."""
+) -> tuple[Any, Any, list[str]]:
+    """Run GroundingDINO on ``rgb`` for ``text_prompt``.
+
+    Save the annotated detection to ``debug_dir`` if given. Return the raw
+    ``(boxes, logits, phrases)`` from
+    ``groundingdino.util.inference.predict`` -- ``boxes`` may be empty (shape (0, 4)).
+    """
     import cv2
     from groundingdino.util.inference import annotate, load_image, predict
 
@@ -184,7 +187,7 @@ def get_point_cloud(
         path.
     """
 
-    def _empty():
+    def _empty() -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         return (np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)) if return_colors else np.zeros((0, 3))
 
     boxes, logits, phrases = _detect_boxes(rgb, text_prompt, model, box_threshold, text_threshold, device, debug_dir)
@@ -204,13 +207,13 @@ def get_point_cloud(
             logger.info(
                 "GroundingDINO matched %d candidates for '%s'; merging all of them: %s.",
                 boxes.shape[0], text_prompt,
-                [f"{p} ({float(l):.3f})" for p, l in zip(phrases, logits)],
+                [f"{p} ({float(logit):.3f})" for p, logit in zip(phrases, logits)],
             )
         else:
             logger.info(
                 "GroundingDINO matched %d candidates for '%s'; picked '%s' (logit=%.3f) over %s.",
                 boxes.shape[0], text_prompt, phrases[best_idx], float(logits[best_idx]),
-                [f"{p} ({float(l):.3f})" for i, (p, l) in enumerate(zip(phrases, logits)) if i != best_idx],
+                [f"{p} ({float(logit):.3f})" for i, (p, logit) in enumerate(zip(phrases, logits)) if i != best_idx],
             )
     selected_indices = range(boxes.shape[0]) if merge_boxes else [best_idx]
 
@@ -263,7 +266,9 @@ def get_point_clouds_per_box(
     debug_dir: Path | None = None,
     max_passes: int = 3,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Like `get_point_cloud`, but keeps every matched GroundingDINO box separate instead of
+    """Return separate point clouds for each matched GroundingDINO box.
+
+    Like `get_point_cloud`, but keeps every matched GroundingDINO box separate instead of
     merging or picking one -- one (points, colors) pair per detected instance (e.g. two
     same-looking cans both matching "yellow can"), so each can get its own fitted ellipsoid.
 
@@ -283,6 +288,16 @@ def get_point_clouds_per_box(
     `merge_boxes`/`return_colors` choice here -- colors are always included, one array per box.
 
     Args:
+        rgb: (H, W, 3) uint8 RGB source image.
+        depth: (H, W) registered depth in meters.
+        camera_intrinsics: (3, 3) intrinsic matrix.
+        camera_to_world: (4, 4) camera-to-base transform.
+        text_prompt: Text identifying the obstacle to detect.
+        model: Loaded GroundingDINO model.
+        box_threshold: Confidence threshold for box detection.
+        text_threshold: Confidence threshold for text matching.
+        device: Torch device for inference.
+        debug_dir: Optional directory for the annotated detection image.
         max_passes: Maximum masked-reattempt rounds (>= 1). Higher catches more distinct
             instances at the cost of one extra GroundingDINO forward pass each round that still
             finds something new.
@@ -305,7 +320,7 @@ def get_point_clouds_per_box(
         logger.info(
             "get_point_clouds_per_box: pass %d matched %d new candidate(s) for '%s': %s.",
             pass_idx, boxes.shape[0], text_prompt,
-            [f"{p} ({float(l):.3f})" for p, l in zip(phrases, logits)],
+            [f"{p} ({float(logit):.3f})" for p, logit in zip(phrases, logits)],
         )
         all_boxes.append(boxes)
         all_logits.append(logits)

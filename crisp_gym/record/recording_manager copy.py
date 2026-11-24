@@ -261,7 +261,7 @@ class RecordingManager(ABC):
                 elif mtype == "SHUTDOWN":
                     logger.info("Shutting down writer process.")
                     break
-            except Exception as e:
+            except Exception:
                 logger.exception("Error occurred", exc_info=True)
             finally:
                 pass

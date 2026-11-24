@@ -1,13 +1,14 @@
+"""Patch cached Groot/Mistral tokenizer configurations when they appear."""
+
 import json
 import os
 import time
-from pathlib import Path
 
 # We define the specific path you identified, but also the base cache dir
 SPECIFIC_PATH = os.path.expanduser("~/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5/tokenizer_config.json")
 BASE_CACHE_DIR = os.path.expanduser("~/.cache/huggingface")
 
-def patch_file(file_path):
+def patch_file(file_path: str | os.PathLike[str]) -> bool:
     """Safely applies the fix_mistral_regex patch to a specific file."""
     try:
         with open(file_path, "r") as f:
@@ -24,8 +25,9 @@ def patch_file(file_path):
         print(f"⚠️ Error patching {file_path}: {e}")
     return False
 
-def run_patch():
-    print(f"🔍 Groot Patcher Active...")
+def run_patch() -> None:
+    """Poll the Hugging Face cache and patch matching tokenizer configurations."""
+    print("🔍 Groot Patcher Active...")
     print(f"🎯 Targeting: {SPECIFIC_PATH}")
     
     while True:
@@ -44,8 +46,8 @@ def run_patch():
                         content = f.read()
                         if "Mistral" in content and '"fix_mistral_regex": true' not in content:
                             patch_file(full_path)
-                except:
-                    pass
+                except OSError as exc:
+                    print(f"⚠️ Error reading {full_path}: {exc}")
 
         time.sleep(5) # Check every 5 seconds
 

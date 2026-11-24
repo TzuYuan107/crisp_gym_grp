@@ -1,3 +1,5 @@
+"""Configuration for the GroundingDINO Swin-T object detection model."""
+
 batch_size = 1
 modelname = "groundingdino"
 backbone = "swin_T_224_1k"

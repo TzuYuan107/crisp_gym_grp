@@ -3,9 +3,11 @@
 import argparse
 import datetime
 import logging
-from pathlib import Path
-import numpy as np
 import multiprocessing as mp
+from pathlib import Path
+
+import numpy as np
+from huggingface_hub import snapshot_download
 
 import crisp_gym  # noqa: F401
 from crisp_gym.config.home import HomeConfig
@@ -18,8 +20,6 @@ from crisp_gym.record.recording_manager import make_recording_manager
 from crisp_gym.util import prompt
 from crisp_gym.util.lerobot_features import get_features
 from crisp_gym.util.setup_logger import setup_logging
-
-from huggingface_hub import snapshot_download
 
 
 def main():

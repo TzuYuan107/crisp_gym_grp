@@ -3,21 +3,21 @@
 
 Usage: python scripts/change_dataset_task.py --repo-id SOURCE/REPO --output-repo-id OUT/REPO --task "new task"
 """
-from pathlib import Path
+import argparse
 import json
 import shutil
-import argparse
 import sys
 import tempfile
+from pathlib import Path
 
-from huggingface_hub import snapshot_download
-
-from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata, LeRobotDataset
-from lerobot.datasets.utils import load_episodes, write_episodes, write_tasks, load_info, write_json
 import pandas as pd
+from huggingface_hub import snapshot_download
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import load_episodes, load_info, write_episodes, write_json, write_tasks
 
 
-def main():
+def main() -> None:
+    """Copy a LeRobot dataset and replace its episode and frame task metadata."""
     p = argparse.ArgumentParser(description="Replace task description for all episodes in a dataset")
     p.add_argument("--repo-id", required=True, help="Source dataset repo id")
     p.add_argument("--output-repo-id", required=True, help="Output local repo id (will be created under HF_LEROBOT_HOME)")
@@ -54,7 +54,7 @@ def main():
     # Replace tasks for every episode
     print(f"Setting task for {len(episodes)} episodes to: {new_task}")
 
-    def _set_task(example):
+    def _set_task(example: dict) -> dict:
         example["tasks"] = [new_task]
         return example
 

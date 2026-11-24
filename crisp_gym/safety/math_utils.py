@@ -200,6 +200,8 @@ def crop_to_bounds(
     `fit_ellipse_from_height_profile`'s intended input -- don't have to duplicate this.
 
     Args:
+        pts: (N, 3) points to crop.
+        xyz_bounds: Inclusive region limits for x, y, and z.
         colors: Optional (N, 3) array aligned 1:1 with `pts` (e.g. from
             `get_point_cloud(..., return_colors=True)`) -- cropped with the same mask and
             returned alongside the points as a `(points, colors)` tuple. If None (default),

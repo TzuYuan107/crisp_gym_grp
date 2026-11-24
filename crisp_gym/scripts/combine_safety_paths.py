@@ -1,4 +1,4 @@
-"""Combine multiple episodes' saved trajectories onto one shared obstacle/ellipsoid scene.
+r"""Combine multiple episodes' saved trajectories onto one shared obstacle/ellipsoid scene.
 
 `SafetyFilter._finalize_episode_debug` (see `crisp_gym/safety/safety_filter.py`) saves, per
 episode, alongside its `trajectory.png`:
@@ -55,7 +55,9 @@ def _ellipsoid_radius_along(direction: np.ndarray, rotation: np.ndarray, semi_ax
 
 
 def _default_label(traj_path: Path) -> str:
-    """Best-effort human label for a trajectory file: its episode folder name if there is one
+    """Choose a human label for a trajectory file.
+
+    Prefer its episode folder name if there is one
     (e.g. `.../episode_0004/trajectory_actual.npy` -> "episode_0004"), else the filename stem.
     """
     parent_name = traj_path.resolve().parent.name
@@ -63,6 +65,7 @@ def _default_label(traj_path: Path) -> str:
 
 
 def main() -> None:
+    """Overlay selected episode trajectories on a shared obstacle scene."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "trajectories",

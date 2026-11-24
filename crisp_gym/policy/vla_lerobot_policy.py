@@ -1,22 +1,22 @@
 """Interface for Pi05 Policy inference in CRISP."""
 
-import os
-# # hide GPU from both main and spawned processes; prevents CUDA allocations
-# os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 import json
 import logging
+import multiprocessing as mp
 from multiprocessing import Pipe
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any, Callable, Tuple
 
 import numpy as np
-import multiprocessing as mp
 import torch
 import torch._inductor.config as inductor_config
 from lerobot.configs.train import TrainPipelineConfig
-from lerobot.policies.factory import LeRobotDatasetMetadata, get_policy_class, make_pre_post_processors
+from lerobot.policies.factory import (
+    LeRobotDatasetMetadata,
+    get_policy_class,
+    make_pre_post_processors,
+)
 from typing_extensions import override
 
 from crisp_gym.envs.manipulator_env import ManipulatorBaseEnv
@@ -74,7 +74,6 @@ class VlaLerobotPolicy(Policy):
     @override
     def make_data_fn(self, task_description: str) -> Callable[[], Tuple[Observation, Action]]:  # noqa: ANN002, ANN003
         """Generate observation and action by communicating with the inference worker."""
-
         logger.info(f"Syncing task to worker: {task_description}")
         self.parent_conn.send(task_description)
 

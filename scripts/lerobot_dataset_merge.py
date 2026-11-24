@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Merge multiple LeRobot datasets and upload to HuggingFace.
-
+"""Merge multiple LeRobot datasets and upload to HuggingFace."""
 
 
 import argparse
@@ -37,6 +36,7 @@ def normalize_frame_for_add(frame: dict, video_keys: set[str]) -> dict:
 
 
 def load_datasets(repo_ids: list) -> list:
+    """Load source datasets and display their episode and task counts."""
     datasets = []
     for repo_id in repo_ids:
         print(f"Loading: {repo_id}")
@@ -52,7 +52,7 @@ def load_datasets(repo_ids: list) -> list:
     return datasets
 
 
-def check_compatibility(datasets: list):
+def check_compatibility(datasets: list) -> None:
     """Ensure all datasets share the same fps and feature set."""
     ref = datasets[0]
     for ds in datasets[1:]:
@@ -80,7 +80,8 @@ def iter_episode_frames(ds: LeRobotDataset, episode_idx: int):
 
 
 def merge_and_upload(source_datasets: list, output_repo_id: str,
-                     local_dir: str, private: bool):
+                     local_dir: str | None, private: bool) -> None:
+    """Merge source episodes into a new dataset and publish it to the Hub."""
     ref = source_datasets[0]
     root = Path(local_dir) if local_dir else None
 
@@ -119,7 +120,8 @@ def merge_and_upload(source_datasets: list, output_repo_id: str,
     print("Done!")
 
 
-def main():
+def main() -> None:
+    """Parse merge options, validate sources, and upload the merged dataset."""
     parser = argparse.ArgumentParser(
         description="Merge multiple LeRobot datasets and upload to HuggingFace"
     )

@@ -42,6 +42,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import yaml
@@ -50,12 +51,16 @@ from crisp_gym.safety.debug_plots import _ellipsoid_surface, plot_obstacle_point
 from crisp_gym.safety.depth_camera import SafetyRGBDCamera, SafetyRGBDCameraConfig
 from crisp_gym.safety.math_utils import (
     crop_to_bounds,
-    fit_ellipse,
-    fit_ellipse_from_height_profile,
     filter_points_by_color,
     filtering_points,
+    fit_ellipse,
+    fit_ellipse_from_height_profile,
 )
-from crisp_gym.safety.perception import get_point_cloud, get_point_clouds_per_box, obstacle_detection
+from crisp_gym.safety.perception import (
+    get_point_cloud,
+    get_point_clouds_per_box,
+    obstacle_detection,
+)
 from crisp_gym.safety.safety_filter import SafetyFilter, SafetyFilterConfig
 from crisp_gym.util.setup_logger import setup_logging
 
@@ -84,7 +89,9 @@ def _geometry_kept_mask(raw_points: np.ndarray, geo_filtered_points: np.ndarray)
 
 
 def _show_annotated_detection(annotated_path: Path | None, obstacle_name: str) -> None:
-    """Pop up the 2D GroundingDINO detection (all matched boxes, `get_point_cloud`/
+    """Show the 2D GroundingDINO detection (all matched boxes).
+
+    `get_point_cloud`/
     `get_point_clouds_per_box` already saved it to disk) so you can see *what* it detected
     without separately hunting down the file. Non-blocking -- stays open while the rest of the
     script computes the 3D plot; closed later via a final `cv2.waitKey(0)`.
@@ -107,14 +114,16 @@ def _run_multi_ellipsoid(
     intrinsics: np.ndarray,
     camera_to_world: np.ndarray,
     obstacle_name: str,
-    model,
-    fc,
+    model: Any,
+    fc: SafetyFilterConfig,
     args: argparse.Namespace,
     debug_dir: Path | None,
     annotated_path: Path | None,
     out_path: Path,
 ) -> None:
-    """`--multi-ellipsoid` path: one point cloud + one fitted ellipsoid per GroundingDINO box
+    """Build one point cloud and fitted ellipsoid per GroundingDINO box.
+
+    `--multi-ellipsoid` path: one point cloud + one fitted ellipsoid per GroundingDINO box
     matching ``obstacle_name`` (e.g. two same-looking cans), instead of the single merged/best-
     box cloud the rest of this script builds.
 
@@ -198,6 +207,7 @@ def _run_multi_ellipsoid(
 
 
 def main() -> None:
+    """Capture a live RGB-D frame and save obstacle and ellipsoid diagnostics."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--config",

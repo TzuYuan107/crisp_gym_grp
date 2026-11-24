@@ -39,9 +39,9 @@ import csv
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from crisp_py.utils.geometry import Pose
 
 from crisp_gym.safety.debug_plots import (
     plot_episode_debug,
@@ -55,7 +55,14 @@ from crisp_gym.safety.math_utils import (
     fit_ellipse_from_height_profile,
 )
 from crisp_gym.safety.panda_kinematics import clamp_to_joint_velocity_limits
-from crisp_gym.safety.perception import get_point_cloud, get_point_clouds_per_box, obstacle_detection
+from crisp_gym.safety.perception import (
+    get_point_cloud,
+    get_point_clouds_per_box,
+    obstacle_detection,
+)
+
+if TYPE_CHECKING:
+    from crisp_py.utils.geometry import Pose
 
 logger = logging.getLogger(__name__)
 
@@ -328,8 +335,10 @@ class SafetyFilterConfig:
 
 @dataclass
 class _Obstacle:
-    """One obstacle's CBF state: its fitted ellipsoid (p2/R2/Q2_diag, same layout as the
-    end-effector proxy's p1/R1/ee_shape_diag) plus its own independently evolving
+    """Hold one obstacle's fitted ellipsoid and CBF separating direction.
+
+    The fitted ellipsoid (p2/R2/Q2_diag, same layout as the
+    end-effector proxy's p1/R1/ee_shape_diag) has its own independently evolving
     separating-direction unit vector (z_fixed) -- see `compute_h_coeffs_3d`'s docstring for what
     z_fixed represents. Each obstacle gets its own z_fixed because nothing ties two different
     obstacles' separating directions together; the ego end-effector (`SafetyFilter.p1`/`R1`) is
@@ -435,7 +444,8 @@ class SafetyFilter:
             return delta * (max_delta / norm), True
         return delta, False
 
-    def _ensure_groundingdino_model(self):
+    def _ensure_groundingdino_model(self) -> Any:
+        """Load and cache the GroundingDINO model on first use."""
         if self._groundingdino_model is None:
             from groundingdino.util.inference import load_model
 
@@ -446,8 +456,9 @@ class SafetyFilter:
         return self._groundingdino_model
 
     def _name_obstacle(self, task_description: str, rgb: np.ndarray) -> str:
-        """Resolve `self.obstacle_name` for this episode -- fixed name or VLM naming, shared by
-        `_localize_obstacle` and `_localize_obstacles_multi`.
+        """Resolve `self.obstacle_name` for this episode -- fixed name or VLM naming.
+
+        This result is shared by `_localize_obstacle` and `_localize_obstacles_multi`.
 
         If `config.obstacle_preference_list` has exactly one entry, that name is used directly
         as the GroundingDINO prompt and the VLM naming step (`obstacle_detection`, which needs
@@ -512,8 +523,10 @@ class SafetyFilter:
         camera_intrinsics: np.ndarray,
         camera_to_world: np.ndarray,
     ) -> list[tuple[np.ndarray, np.ndarray]]:
-        """Like `_localize_obstacle`, but keeps every GroundingDINO box matching the named
-        obstacle separate instead of only the single highest-confidence one -- one
+        """Keep every GroundingDINO box matching the named obstacle separate.
+
+        Unlike `_localize_obstacle`, this keeps every matched box separate instead of
+        only the single highest-confidence one -- one
         (cropped_points, cropped_colors) pair per detected instance (e.g. two same-looking
         cans), for `config.multi_obstacle`'s per-obstacle ellipsoid fit in `reset`. Same
         perception primitives as the debug tool's own `--multi-ellipsoid` path
