@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # replace with your dataset repo e.g. cbrian/pi05_test_dataset
-DATASET_REPO=cbrian/merge_task1_DM_epi_200
+DATASET_REPO=hf_username/dataset_repo_name
 # replace with your output directory e.g. outputs/pi05_test_training
 # NOTE: Keep "/workspace/outputs/" prefix, only change the folder name after it
-OUTPUT_DIR=/workspace/apptainer_outputs/pi05_task1_DM1_epi_200_step_20000_batch_32
+OUTPUT_DIR=/workspace/apptainer_outputs/model_name
 # replace with your job name e.g. pi05_test_job
-JOB_NAME=train_pi05_task1_DM1_epi_200_step_20000_batch_32
+JOB_NAME=job_name
 # replace with your policy repo e.g. cbrian/pi05_test_trained_policy
-POLICY_REPO=cbrian/pi05_task1_DM1_epi_200_step_20000_batch_32
+POLICY_REPO=hf_username/model_repo_name
 STEPS=20000
 
 lerobot-train \
