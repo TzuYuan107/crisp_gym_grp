@@ -41,3 +41,17 @@ All three environments installed on Linux x86-64 with Pixi 0.84.2. [pixi.lock](.
 
 - A LeRobot **package version** is not a **dataset format version**. The tagged [metadata class](https://github.com/huggingface/lerobot/blob/v0.7.0/src/lerobot/datasets/dataset_metadata.py) still declares `CODEBASE_VERSION = "v3.0"`. Don't bulk-convert existing v3.0 data just to upgrade the package. Back up a representative recording and test camera decode, state/action names, task strings and episode counts before resuming on the original.
 - **GR00T N1.5 checkpoints cannot be loaded by 0.7.0.** The [0.7.0 GR00T configuration](https://github.com/huggingface/lerobot/blob/v0.7.0/src/lerobot/policies/groot/configuration_groot.py) explicitly rejects N1.5 and names 0.5.1 as the last supporting release. Keep the former environment/image for N1.5 inference or fine-tune an N1.7 base (`nvidia/GR00T-N1.7-3B`). Renaming an old checkpoint is not a migration.
+
+## On-site testing log
+
+### `pixi run -e jazzy-lerobot crisp-record-leader-follower`
+
+- **Error:** `ImportError: cannot import name 'LeRobotDatasetMetadata' from 'lerobot.policies.factory'` raised from `crisp_gym/policy/lerobot_policy.py` (imported via `crisp_gym/policy/__init__.py`).
+- **Cause:** 0.7.0's `lerobot.policies.factory` no longer re-exports `LeRobotDatasetMetadata`; it lives in `lerobot.datasets` (`dataset_metadata.py`).
+- **Fix:** import it with `from lerobot.datasets import LeRobotDatasetMetadata` in:
+  - `crisp_gym/policy/lerobot_policy.py`
+  - `crisp_gym/policy/vla_lerobot_policy.py`
+  - `crisp_gym/policy/vlsa_lerobot_policy.py`
+  
+  `get_policy_class` and `make_pre_post_processors` are still imported from `lerobot.policies.factory`. `async_lerobot_policy.py` needed no change.
+- **Verified:** `pixi run -e jazzy-lerobot python -c "import crisp_gym.policy.lerobot_policy"` succeeds. The vla/vlsa modules were edited but not import-tested in this environment (they need the policy environment). The full recording run has not yet been re-run.

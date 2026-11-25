@@ -454,7 +454,13 @@ class ROSRecordingManager(RecordingManager):
         executor = SingleThreadedExecutor()
         executor.add_node(self.node)
         while rclpy.ok():
-            executor.spin_once(timeout_sec=0.1)
+            try:
+                executor.spin_once(timeout_sec=0.1)
+            except Exception:
+                # rclpy.shutdown() from the main thread can invalidate the wait set mid-spin.
+                if rclpy.ok():
+                    raise
+                break
 
     @override
     def get_instructions(self) -> str:

@@ -307,7 +307,7 @@ def main():
             logger.info("Homing leader.")
             leader.robot.home()
         logger.info("Homing follower.")
-        env.home(home_config=HomeConfig.TOUCH_TABLE.randomize(noise=args.home_config_noise))
+        env.home()
 
         logger.info("Closing the environment.")
         env.close()

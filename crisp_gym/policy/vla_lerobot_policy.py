@@ -12,8 +12,8 @@ import numpy as np
 import torch
 import torch._inductor.config as inductor_config
 from lerobot.configs.train import TrainPipelineConfig
+from lerobot.datasets import LeRobotDatasetMetadata
 from lerobot.policies.factory import (
-    LeRobotDatasetMetadata,
     get_policy_class,
     make_pre_post_processors,
 )
