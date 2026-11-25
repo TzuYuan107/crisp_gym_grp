@@ -45,6 +45,77 @@ The [v0.7.0 release notes](https://github.com/huggingface/lerobot/releases/tag/v
 - `docker/docker_train_pi05.sh` and `docker/docker_train_groot.sh` already use `--trackio.*`.
 - **Do not mix interfaces.** An image or environment that still has the pre-0.7.0 training CLI rejects `--trackio.*`.
 
+## PI0.5 Apptainer image
+
+For Apptainer training, build the image from [pi05.def](../docker/pi05.def)
+before submitting the Slurm job. From the repository root on the cluster:
+
+```bash
+# Optional: choose locations with enough space for the build and downloads.
+export APPTAINER_TMPDIR=/path/to/large/tmp
+export APPTAINER_CACHEDIR=/path/to/large/cache
+mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+./docker/build_pi05_sif.sh
+```
+
+The script writes `docker/pi05.sif`, the path used by `sbatch.sh`. To replace a
+stale image, add `--force`; the existing image is retained if the build fails.
+The cluster build uses `--ignore-fakeroot-command` to avoid injecting a host
+fakeroot library that can require a newer glibc than the Ubuntu 22.04 image.
+This does not require sudo if the cluster permits the necessary user namespaces,
+but may fail if its fakeroot configuration is insufficient; ask the cluster
+administrator or use the local Docker option below.
+
+To build locally instead, Docker must be installed and able to run privileged
+containers. Run from the local repository root:
+
+```bash
+./docker/build_pi05_sif.sh --docker
+# Add --force if docker/pi05.sif already exists.
+```
+
+### Transferring the image through a registry (ORAS)
+
+If the cluster cannot receive the file directly, push the locally built image to
+an OCI registry with [push_pi05_sif.sh](../docker/push_pi05_sif.sh) and pull it on
+the cluster. The `oras://` protocol needs only Apptainer on the cluster, not Docker.
+
+```bash
+# Local machine (add --docker if Apptainer is not installed locally)
+./docker/push_pi05_sif.sh --account <your_account> [--registry ghcr.io] [--tag 0.7.0] --docker
+
+# Cluster, from the repository root
+apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
+# example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
+```
+
+- `<your_account>` is your **GitHub username** (`--account` or `REGISTRY_ACCOUNT`); registry and tag can also be set with `REGISTRY_HOST` and `SIF_TAG`. The default is `ghcr.io` with tag `0.7.0`.
+- **Create a personal access token first:** GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token, with the `write:packages` scope. A token with `read:packages` is enough to pull a private image on the cluster.
+- When the script prompts for a password, **paste the token**, not your GitHub password. With `--docker` it is stored only in a throwaway container.
+- The registry must support OCI artifacts. GHCR does; Docker Hub support for ORAS artifacts is limited, so GHCR is the recommended default.
+- A GHCR package is private by default, and GitHub provides no API to change this from the push script. After the first push, make it public once in the web UI (package → Package settings → Danger Zone → Change visibility); the script prints the link. Later pushes keep the setting. Otherwise log in on the cluster first with `apptainer registry login --username <your_account> oras://ghcr.io`.
+- Add `--force` to `apptainer pull` to replace a stale `docker/pi05.sif`.
+- Pushing sends a multi-GB image, and the pulled file is the same size, so allow for the space and time.
+
+The local build runs the `kaczmarj/apptainer:latest` builder with `--privileged`
+and mounts the repository; only use it if you trust that image. It needs internet
+access and substantial free space in Docker's storage and the repository
+filesystem. A local `APPTAINER_TMPDIR` or `APPTAINER_CACHEDIR` is not passed
+into the Docker builder.
+
+On the cluster, verify the copied or built image before training:
+
+```bash
+apptainer exec docker/pi05.sif python -c "import lerobot; print(lerobot.__version__)"
+apptainer exec docker/pi05.sif lerobot-train --help | grep trackio
+mkdir -p .logs
+sbatch sbatch.sh
+```
+
+The version should be `0.7.0`, and the help output should include Trackio
+options. Configure the dataset and policy IDs in
+[docker_train_pi05.sh](../docker/docker_train_pi05.sh) before submitting.
+
 ## Validation evidence
 
 - **Binary stack:** `rclpy`, OpenCV, torch and torchcodec imported in the recording environment. A six-frame synthetic camera/action episode was written, finalized, reopened, and decoded (`[3,48,64]`, expected action and task). A CUDA torchvision NMS kernel ran on the RTX 3090 Ti (driver 595.99.02).

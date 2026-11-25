@@ -134,9 +134,49 @@ hf auth login
 For Slurm pi05 training, use the same IDs configured in `docker/docker_train_pi05.sh`:
 
 ```bash
+# On the cluster, build the LeRobot 0.7.0 Apptainer image first.
+./docker/build_pi05_sif.sh
 mkdir -p .logs
 sbatch sbatch.sh
 ```
+
+The build produces `docker/pi05.sif`, which `sbatch.sh` uses. If an older image
+already exists, rebuild it with `./docker/build_pi05_sif.sh --force`. The
+cluster build uses `--ignore-fakeroot-command` to avoid a host/container glibc
+incompatibility; it still needs suitable user-namespace permissions. Build on a
+node with internet access and sufficient temporary and cache space.
+
+Alternatively, on a local machine with Docker, run
+`./docker/build_pi05_sif.sh --docker` (add `--force` to replace an existing
+image). This uses a **privileged** Docker container, so use it only if you trust
+the builder image.
+
+If the cluster cannot receive file transfers, push the image to an OCI registry
+(default GHCR) and pull it on the cluster, which needs only Apptainer:
+
+`<your_account>` is your **GitHub username**. Before pushing, create a GitHub
+**personal access token (classic)** at GitHub → Settings → Developer settings →
+Personal access tokens → Tokens (classic), with the `write:packages` scope
+(`read:packages` is enough for pulling a private image on the cluster). When the
+script prompts for a password, paste the token (not your GitHub password).
+
+```bash
+# Local machine: you are prompted for the token
+./docker/push_pi05_sif.sh --account <your_account> --docker   # drop --docker if Apptainer is installed
+
+# Cluster: pull into the path used by sbatch.sh (use the command the script prints)
+apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
+# example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
+```
+
+Use `--registry` and `--tag` to change the registry or tag. A new GHCR package is
+**private** and GitHub offers no way to change this from the script, so after the
+first push make it public once on GitHub (`pi05` package → Package settings →
+Danger Zone → Change visibility; the script prints the link). Later pushes keep
+that setting. Otherwise, for a private
+package, run `apptainer registry login --username <your_account> oras://ghcr.io`
+on the cluster first. See the [migration notes](docs/lerobot-v0.7.0.md#pi05-apptainer-image) for
+build prerequisites and image verification.
 
 ---
 
