@@ -45,7 +45,7 @@ The [v0.7.0 release notes](https://github.com/huggingface/lerobot/releases/tag/v
 - `docker/docker_train_pi05.sh` and `docker/docker_train_groot.sh` already use `--trackio.*`.
 - **Do not mix interfaces.** An image or environment that still has the pre-0.7.0 training CLI rejects `--trackio.*`.
 
-## PI0.5 Apptainer image
+## Policy Apptainer image (PI0.5 and GR00T N1.7)
 
 For Apptainer training, build the image before submitting the Slurm job. From
 the repository root:
@@ -59,10 +59,9 @@ mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
 ```
 
 [build_sif.sh](../docker/build_sif.sh) is interactive. It lists every
-`docker/<name>.def` and asks which to build: [pi05.def](../docker/pi05.def) gives
-`docker/pi05.sif` (the path used by `sbatch.sh`), and [groot.def](../docker/groot.def)
-gives `docker/groot.sif` for GR00T N1.7. To support a future policy, add
-`docker/<name>.def`; it appears in the menu with no script changes. It then asks
+`docker/<name>.def` and asks which to build: [policy.def](../docker/policy.def) gives
+`docker/policy.sif`, the single image for both PI0.5 and GR00T N1.7. A new `.def` appears
+in the menu with no script changes. It then asks
 whether to run Apptainer on this machine or through Docker. If `docker/<name>.sif`
 already exists you must confirm the replacement, and the existing image is
 retained if the build fails.
@@ -79,10 +78,22 @@ retained if the build fails.
   filesystem. A local `APPTAINER_TMPDIR` or `APPTAINER_CACHEDIR` is not passed into
   the Docker builder.
 
-[groot.def](../docker/groot.def) mirrors [Dockerfile.groot](../docker/Dockerfile.groot)
-(`lerobot[groot,training]==0.7.0`, ffmpeg 7 PPA). `sbatch.sh` selects the policy with
-`POLICY` (default `pi05`): `POLICY=groot sbatch --job-name=groot_training sbatch.sh` runs
-`docker/groot.sif` with `docker/docker_train_groot.sh`.
+### One image for both policies
+
+[policy.def](../docker/policy.def) and [Dockerfile.policy](../docker/Dockerfile.policy) install
+`lerobot[pi,groot,training]==0.7.0` under [training-constraints.txt](../docker/training-constraints.txt)
+(ffmpeg 8 PPA), mirroring the `jazzy-policy` Pixi environment. The v0.4.4 separate images were needed
+because `pi` and `groot` conflicted; in 0.7.0 both share `transformers-dep`, so the Dockerfiles
+differed only in the extra. Policy-specific settings live in
+`docker/docker_train_<policy>.sh`. [sbatch_policy.sh](../sbatch_policy.sh) selects the policy with
+`POLICY` (default `pi05`) and runs `docker/docker_train_<policy>.sh` in `docker/<policy>.sif` if it
+exists, else in `docker/policy.sif`: `POLICY=groot sbatch --job-name=groot_training sbatch_policy.sh`.
+
+**Adding a policy:** with the same dependencies, only add `docker/docker_train_<policy>.sh` and list
+it in the `COPY` line of `Dockerfile.policy`. For a new compatible extra, add it to the install line
+in `Dockerfile.policy` and `policy.def` and rebuild. Only for conflicting dependencies add
+`Dockerfile.<policy>` and `<policy>.def`; the build scripts and `sbatch_policy.sh` find them
+automatically. See the README section "Adding a new policy".
 
 ### Transferring the image through a registry (ORAS)
 
@@ -98,26 +109,25 @@ The script asks which built image to push, the registry account, registry host
 ./docker/push_sif.sh
 
 # Cluster, from the repository root (the script prints the exact command)
-apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
-# example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
-# GR00T N1.7: apptainer pull docker/groot.sif oras://ghcr.io/<your_account>/groot:0.7.0
+apptainer pull docker/policy.sif oras://ghcr.io/<your_account>/policy:0.7.0
+# example: apptainer pull docker/policy.sif oras://ghcr.io/tzuyuan107/policy:0.7.0
 ```
 
 - `<your_account>` is your **GitHub username**.
 - **Create a personal access token first:** GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token, with the `write:packages` scope. A token with `read:packages` is enough to pull a private image on the cluster.
 - When the script prompts for a password, **paste the token**, not your GitHub password. With the Docker option it is stored only in a throwaway container.
 - The registry must support OCI artifacts. GHCR does; Docker Hub support for ORAS artifacts is limited, so GHCR is the recommended default.
-- A GHCR package is private by default, and GitHub provides no API to change this from the push script. After the first push of each image (`pi05`, `groot`, ...), make it public once in the web UI (package → Package settings → Danger Zone → Change visibility); the script prints the link. Later pushes keep the setting. Otherwise log in on the cluster first with `apptainer registry login --username <your_account> oras://ghcr.io`.
+- A GHCR package is private by default, and GitHub provides no API to change this from the push script. After the first push of each image (`policy`, ...), make it public once in the web UI (package → Package settings → Danger Zone → Change visibility); the script prints the link. Later pushes keep the setting. Otherwise log in on the cluster first with `apptainer registry login --username <your_account> oras://ghcr.io`.
 - Add `--force` to `apptainer pull` to replace a stale `docker/<name>.sif`.
 - Pushing sends a multi-GB image, and the pulled file is the same size, so allow for the space and time.
 
 On the cluster, verify the copied or built image before training:
 
 ```bash
-apptainer exec docker/pi05.sif python -c "import lerobot; print(lerobot.__version__)"
-apptainer exec docker/pi05.sif lerobot-train --help | grep trackio  # or docker/groot.sif
+apptainer exec docker/policy.sif python -c "import lerobot; print(lerobot.__version__)"
+apptainer exec docker/policy.sif lerobot-train --help | grep trackio
 mkdir -p .logs
-sbatch sbatch.sh
+sbatch sbatch_policy.sh
 ```
 
 The version should be `0.7.0`, and the help output should include Trackio

@@ -109,11 +109,16 @@ export POLICY_REPO=your-account/your-policy
 
 The `docker/` folder also provides container training launchers.
 
-To simplify the setup, use the provided automation script to build your image and launch the container:
+PI0.5 and GR00T N1.7 share **one image** (`Dockerfile.policy` / `policy.def`, installing
+`lerobot[pi,groot,training]==0.7.0`), matching the `jazzy-policy` Pixi environment. Only the
+launcher `docker/docker_train_<policy>.sh` differs per policy (dataset/policy IDs and `lerobot-train` arguments).
+
+To simplify the setup, use the provided automation script to build your image and launch the container
+(it lists every `docker/Dockerfile.*`):
 
 ```bash
 # automation script to build your image and launch the container:
-./docker/build_and_run_docker.sh
+./docker/build_and_run_policy_docker.sh
 ```
 
 Inside the container, choose one launcher. The container scripts log to Trackio rather than W&B.
@@ -137,24 +142,25 @@ login inside a container is lost when the container is removed. Run one launcher
 ```
 
 For Slurm training (Apptainer), there is no terminal for the login prompt, so the
-launcher would stop. Export your Hugging Face token before submitting; `sbatch.sh` forwards `HF_TOKEN`
+launcher would stop. Export your Hugging Face token before submitting; `sbatch_policy.sh` forwards `HF_TOKEN`
 into the container. Use the IDs configured in the policy's `docker/docker_train_<policy>.sh`.
-`sbatch.sh` picks the policy from the `POLICY` environment variable (default `pi05`) and
-runs `docker/<policy>.sif` with `docker/docker_train_<policy>.sh`:
+`sbatch_policy.sh` picks the policy from the `POLICY` environment variable (default `pi05`) and
+runs `docker/docker_train_<policy>.sh` in `docker/<policy>.sif` if that file exists, otherwise in
+the shared `docker/policy.sif`:
 
 ```bash
 export HF_TOKEN=<your Hugging Face token>
 # On the cluster, build or pull the LeRobot 0.7.0 Apptainer image first (see below).
 mkdir -p .logs
-sbatch sbatch.sh                                              # pi05
-POLICY=groot sbatch --job-name=groot_training sbatch.sh      # GR00T N1.7
+sbatch sbatch_policy.sh                                       # pi05
+POLICY=groot sbatch --job-name=groot_training sbatch_policy.sh  # GR00T N1.7
 ```
 
 ### Apptainer images (`docker/*.sif`)
 
 `./docker/build_sif.sh` builds an image from a definition file in `docker/`. It asks
-which image to build (every `docker/<name>.def`, currently
-[pi05.def](docker/pi05.def) and [groot.def](docker/groot.def) for GR00T N1.7) and
+which image to build (every `docker/<name>.def`, currently the shared
+[policy.def](docker/policy.def) for PI0.5 and GR00T N1.7) and
 whether to run Apptainer directly or through Docker. To support a new policy, add
 `docker/<name>.def`; it appears in the menu automatically. The result is
 `docker/<name>.sif`, and an existing image is only replaced if you confirm.
@@ -181,10 +187,9 @@ script prompts for a password, paste the token (not your GitHub password).
 # Local machine: answer the prompts, then paste the token when asked for a password
 ./docker/push_sif.sh
 
-# Cluster: pull into the path used by sbatch.sh (the script prints the exact command)
-apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
-# example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
-# GR00T N1.7: apptainer pull docker/groot.sif oras://ghcr.io/<your_account>/groot:0.7.0
+# Cluster: pull into the path used by sbatch_policy.sh (the script prints the exact command)
+apptainer pull docker/policy.sif oras://ghcr.io/<your_account>/policy:0.7.0
+# example: apptainer pull docker/policy.sif oras://ghcr.io/tzuyuan107/policy:0.7.0
 ```
 
 A new GHCR package is **private** and GitHub offers no way to change this from the
@@ -198,28 +203,28 @@ prerequisites and image verification.
 
 ### Adding a new policy
 
-Replace `<policy>` with your policy name (e.g. `smolvla`). Use `docker/pi05.def`,
-`docker/Dockerfile.pi05` and `docker/docker_train_pi05.sh` as templates.
+Replace `<policy>` with your policy name (e.g. `smolvla`). First decide whether the shared image
+already covers it:
 
-**Apptainer (cluster)**
-
-1. Add `docker/<policy>.def` (change the extras in `lerobot[<extra>,training]==0.7.0`).
-2. Add `docker/docker_train_<policy>.sh` (dataset/policy IDs and `lerobot-train` arguments).
-3. Nothing to edit in `build_sif.sh` and `push_sif.sh`: they list every `docker/<name>.def`
-   and every built `docker/<name>.sif`, so the new policy appears in their menus automatically.
-4. Nothing to edit in `sbatch.sh` either: run `POLICY=<policy> sbatch sbatch.sh`.
-
-**Docker**
-
-1. Add `docker/Dockerfile.<policy>`.
-2. Add `docker/docker_train_<policy>.sh` (the Dockerfile copies it into the image).
-3. Add `"Dockerfile.<policy>"` to the `DOCKERFILES` list in `docker/build_and_run_docker.sh`.
+- **Same dependencies as PI0.5/GR00T** (the usual case): only add
+  `docker/docker_train_<policy>.sh` (use `docker_train_pi05.sh` as a template) and list it in the
+  `COPY` line of `docker/Dockerfile.policy`. Nothing else changes: `build_sif.sh`,
+  `push_sif.sh` and `build_and_run_policy_docker.sh` already offer the shared image, and
+  `POLICY=<policy> sbatch sbatch_policy.sh` finds the launcher by name.
+- **A new extra that resolves together with the others:** additionally add it to the install line in
+  `docker/Dockerfile.policy` and `docker/policy.def` (`lerobot[pi,groot,<extra>,training]==0.7.0`),
+  rebuild and re-push the image.
+- **Conflicting dependencies** (e.g. a different torch pin): give the policy its own image. Add
+  `docker/Dockerfile.<policy>` and `docker/<policy>.def` (use `Dockerfile.policy` / `policy.def`
+  as templates) plus the launcher. All scripts discover them automatically
+  (`build_sif.sh` lists `*.def`, `build_and_run_policy_docker.sh` lists `Dockerfile.*`, and
+  `sbatch_policy.sh` prefers `docker/<policy>.sif` over `policy.sif`).
 
 Also check:
-- Both launchers must use `--trackio.*` (not `--wandb.*`) arguments and keep the Hugging Face
+- Launchers must use `--trackio.*` (not `--wandb.*`) arguments and keep the Hugging Face
   login check from the existing launchers.
-- If the policy needs different dependencies, update `docker/training-constraints.txt` (shared by
-  all images) and the migration notes.
+- If dependencies change, update `docker/training-constraints.txt` (shared by all images) and the
+  migration notes.
 - Optionally add `scripts/train_<policy>.sh` for training outside a container.
 - For deployment, check that the policy is covered by the `jazzy-policy` Pixi environment (`pixi.toml`).
 - `.sif` files are git-ignored; share a new image through `push_sif.sh` and make its GHCR package public once.
