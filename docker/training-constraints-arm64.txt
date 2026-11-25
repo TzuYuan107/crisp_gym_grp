@@ -1,0 +1,5 @@
+# aarch64 (e.g. GB200/Grace). lerobot 0.7.0 requires torchcodec>=0.11 on Linux aarch64, which pairs with torch 2.11.
+# PyPI aarch64 torch wheels are CPU-only; the CUDA 12.8 builds come from https://download.pytorch.org/whl/cu128.
+torch==2.11.0
+torchvision==0.26.0
+torchcodec==0.11.0
