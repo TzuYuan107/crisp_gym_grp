@@ -16,6 +16,7 @@ from typing_extensions import override
 
 from crisp_gym.envs.manipulator_env import ManipulatorBaseEnv
 from crisp_gym.policy.policy import Action, Observation, Policy, register_policy
+from crisp_gym.policy.train_config_compat import load_train_config
 from crisp_gym.util.lerobot_features import concatenate_state_features, numpy_obs_to_torch
 from crisp_gym.util.setup_logger import setup_logging
 
@@ -135,7 +136,7 @@ def inference_worker(
 
         logger.info(f"[Inference] Loading training config from {pretrained_path}...")
 
-        train_config = TrainPipelineConfig.from_pretrained(pretrained_path)
+        train_config = load_train_config(pretrained_path)
 
         _check_dataset_metadata(train_config, env, logger)
 

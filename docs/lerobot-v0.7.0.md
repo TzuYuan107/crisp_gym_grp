@@ -147,3 +147,9 @@ options. Configure the dataset and policy IDs in
 - **Error:** `lerobot-train: error: unrecognized arguments: --trackio.enable=true --trackio.disable_artifact=false` (`.logs/job_99079.err`). The usage text in that log lists `--wandb.*` options and no `--trackio.*` options.
 - **Cause:** the launcher uses the 0.7.0 flags, but the `lerobot-train` executable inside `docker/pi05.sif` exposes the older W&B interface. Checked inside the image: `lerobot.__version__` is `0.4.4`, and `lerobot-train --help` shows `--wandb.*` options but no `--trackio.*` options. [pi05.def](../docker/pi05.def) requests `lerobot[pi,training]==0.7.0`, so `docker/pi05.sif` is stale and was built before the definition changed.
 - **Fix:** rebuild `docker/pi05.sif` from the current `pi05.def`, then repeat the two checks above (`python -c "import lerobot; print(lerobot.__version__)"` should print `0.7.0`; `lerobot-train --help | grep trackio` should match). Keep `--trackio.*`; do not revert to `--wandb.*`.
+
+### `pixi run -e jazzy-policy crisp-deploy-vla` (pi05 checkpoint)
+
+- **Error:** `DecodingError: The fields `eval_freq` are not valid for TrainPipelineConfig`.
+- **Cause:** a checkpoint trained with 0.4.4 has `eval_freq` in `train_config.json`; 0.7.0 renamed it to `env_eval_freq`.
+- **Fix:** new `crisp_gym/policy/train_config_compat.py` (`load_train_config`) renames the field before parsing; used in `lerobot_policy.py`, `vla_lerobot_policy.py` and `vlsa_lerobot_policy.py`. Not yet re-run on the robot.

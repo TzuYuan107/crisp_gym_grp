@@ -52,5 +52,41 @@ class CrispGymPolicyImportTest(unittest.TestCase):
         self._import("crisp_gym.policy.vlsa_lerobot_policy")
 
 
+class TrainConfigCompatTest(unittest.TestCase):
+    """Checks loading of train_config.json files saved by LeRobot 0.4.4."""
+
+    def _write_config(self, directory: str, extra: dict) -> None:
+        """Write a minimal train_config.json with the extra fields merged in."""
+        import json
+        import os
+
+        config = {"dataset": {"repo_id": "user/dataset"}, "policy": None}
+        config.update(extra)
+        with open(os.path.join(directory, "train_config.json"), "w") as f:
+            json.dump(config, f)
+
+    def test_legacy_eval_freq_is_migrated(self):
+        """A legacy `eval_freq` field is loaded as `env_eval_freq`."""
+        import tempfile
+
+        from crisp_gym.policy.train_config_compat import load_train_config
+
+        with tempfile.TemporaryDirectory() as d:
+            self._write_config(d, {"eval_freq": 123})
+            config = load_train_config(d)
+        self.assertEqual(config.env_eval_freq, 123)
+
+    def test_current_config_is_unchanged(self):
+        """A config already using `env_eval_freq` loads unchanged."""
+        import tempfile
+
+        from crisp_gym.policy.train_config_compat import load_train_config
+
+        with tempfile.TemporaryDirectory() as d:
+            self._write_config(d, {"env_eval_freq": 7})
+            config = load_train_config(d)
+        self.assertEqual(config.env_eval_freq, 7)
+
+
 if __name__ == "__main__":
     unittest.main()

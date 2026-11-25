@@ -38,6 +38,7 @@ from typing_extensions import override
 
 from crisp_gym.envs.manipulator_env import ManipulatorBaseEnv
 from crisp_gym.policy.policy import Action, Observation, Policy, register_policy
+from crisp_gym.policy.train_config_compat import load_train_config
 from crisp_gym.safety.depth_camera import SafetyRGBDCamera, SafetyRGBDCameraConfig
 from crisp_gym.safety.safety_filter import SafetyFilter, SafetyFilterConfig
 from crisp_gym.util.lerobot_features import concatenate_state_features, numpy_obs_to_torch
@@ -306,7 +307,7 @@ def inference_worker(
 
         logger.info(f"[Vlsa Inference] Loading training config from {pretrained_path}...")
 
-        train_config = TrainPipelineConfig.from_pretrained(pretrained_path)
+        train_config = load_train_config(pretrained_path)
         _check_dataset_metadata(train_config, env_metadata, logger)
         logger.info("[Vlsa Inference] Loaded training config.")
         logger.debug(f"[Vlsa Inference] Train config: {train_config}")

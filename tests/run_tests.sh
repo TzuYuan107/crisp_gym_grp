@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the repo unit tests. Usage: scripts/run_tests.sh [pixi-env] (default: jazzy-lerobot)
+# Run the repo unit tests. Usage: tests/run_tests.sh [pixi-env] (default: jazzy-lerobot)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
