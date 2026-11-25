@@ -219,6 +219,9 @@ already covers it:
   as templates) plus the launcher. All scripts discover them automatically
   (`build_sif.sh` lists `*.def`, `build_and_run_policy_docker.sh` lists `Dockerfile.*`, and
   `sbatch_policy.sh` prefers `docker/<policy>.sif` over `policy.sif`).
+  Name the `.def` after the policy so `POLICY=<policy>` finds `docker/<policy>.sif`; if the image
+  has another name (e.g. `policy-arm64` on GB200), run `IMAGE=<name> POLICY=<policy> sbatch sbatch_policy.sh`.
+  `sbatch_policy.sh` prints the chosen image at the start of the job log.
 
 Also check:
 - Launchers must use `--trackio.*` (not `--wandb.*`) arguments and keep the Hugging Face

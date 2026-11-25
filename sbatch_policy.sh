@@ -24,8 +24,11 @@ SIF="docker/${IMAGE:-$POLICY}.sif"
 LAUNCHER="./docker/docker_train_${POLICY}.sh"
 if [ ! -f "$SIF" ] || [ ! -f "$LAUNCHER" ]; then
   echo "Missing $SIF or $LAUNCHER for POLICY=$POLICY" >&2
+  echo "Available images: $(ls docker/*.sif 2>/dev/null | tr '\n' ' ')" >&2
+  echo "Set IMAGE=<name> to use docker/<name>.sif." >&2
   exit 1
 fi
+echo "POLICY=$POLICY IMAGE=$SIF LAUNCHER=$LAUNCHER"
 
 # ==========================================
 # 2. Environment & Container Execution
