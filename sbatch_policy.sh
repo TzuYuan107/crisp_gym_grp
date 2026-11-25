@@ -3,7 +3,7 @@
 # ==========================================
 # 1. Slurm Resource Requests (from your srun)
 # ==========================================
-#SBATCH --job-name=policy_training  # override with: sbatch --job-name=groot_training sbatch.sh
+#SBATCH --job-name=policy_training  # override with: sbatch --job-name=groot_training sbatch_policy.sh
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:rtx4090:1
 #SBATCH --cpus-per-task=8
@@ -15,7 +15,7 @@
 # Ensure the script starts in the directory where you ran sbatch
 cd "$SLURM_SUBMIT_DIR" || exit 1
 
-# Policy to train: POLICY=<name> sbatch sbatch.sh (default pi05).
+# Policy to train: POLICY=<name> sbatch sbatch_policy.sh (default pi05).
 # Image: docker/${IMAGE}.sif if IMAGE is set (e.g. IMAGE=policy-arm64 on GB200), else docker/<name>.sif
 # if present, else the shared docker/policy.sif. Launcher: docker/docker_train_<name>.sh.
 POLICY="${POLICY:-pi05}"

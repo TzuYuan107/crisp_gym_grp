@@ -160,11 +160,11 @@ options. Configure the dataset and policy IDs in
   `get_policy_class` and `make_pre_post_processors` are still imported from `lerobot.policies.factory`. `async_lerobot_policy.py` needed no change.
 - **Verified:** `pixi run -e jazzy-lerobot python -c "import crisp_gym.policy.lerobot_policy"` succeeds. The vla/vlsa modules were edited but not import-tested in this environment (they need the policy environment). The full recording run has not yet been re-run.
 
-### `sbatch sbatch.sh` (pi05 Apptainer training)
+### `sbatch sbatch_policy.sh` (pi05 Apptainer training)
 
 - **Error:** `lerobot-train: error: unrecognized arguments: --trackio.enable=true --trackio.disable_artifact=false` (`.logs/job_99079.err`). The usage text in that log lists `--wandb.*` options and no `--trackio.*` options.
-- **Cause:** the launcher uses the 0.7.0 flags, but the `lerobot-train` executable inside `docker/pi05.sif` exposes the older W&B interface. Checked inside the image: `lerobot.__version__` is `0.4.4`, and `lerobot-train --help` shows `--wandb.*` options but no `--trackio.*` options. [pi05.def](../docker/pi05.def) requests `lerobot[pi,training]==0.7.0`, so `docker/pi05.sif` is stale and was built before the definition changed.
-- **Fix:** rebuild `docker/pi05.sif` from the current `pi05.def`, then repeat the two checks above (`python -c "import lerobot; print(lerobot.__version__)"` should print `0.7.0`; `lerobot-train --help | grep trackio` should match). Keep `--trackio.*`; do not revert to `--wandb.*`.
+- **Cause:** the launcher uses the 0.7.0 flags, but the `lerobot-train` executable inside `docker/pi05.sif` exposes the older W&B interface. Checked inside the image: `lerobot.__version__` is `0.4.4`, and `lerobot-train --help` shows `--wandb.*` options but no `--trackio.*` options. The former `pi05.def` requests `lerobot[pi,training]==0.7.0`, so `docker/pi05.sif` is stale and was built before the definition changed.
+- **Fix:** rebuild `docker/pi05.sif` from the current `policy.def`, then repeat the two checks above (`python -c "import lerobot; print(lerobot.__version__)"` should print `0.7.0`; `lerobot-train --help | grep trackio` should match). Keep `--trackio.*`; do not revert to `--wandb.*`.
 
 ### `pixi run -e jazzy-policy crisp-deploy-vla` (pi05 checkpoint)
 
