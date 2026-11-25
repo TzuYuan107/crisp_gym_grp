@@ -30,6 +30,21 @@ All three environments installed on Linux x86-64 with Pixi 0.84.2. [pixi.lock](.
 | ROS / Python overlap | Align conda's OpenCV (<4.14), Pillow (<14), packaging (<27), setuptools (<85) and CMake (<4.2) with the upstream ranges. ROS cv-bridge and the recorder use OpenCV 4.13.0. Keep conda `pynput` for the local recording manager. |
 | Training telemetry | `training` includes Accelerate and Trackio, not W&B. Host scripts disable logging; container scripts use Trackio. |
 
+### Training telemetry: W&B → Trackio
+
+The [v0.7.0 release notes](https://github.com/huggingface/lerobot/releases/tag/v0.7.0) list this as a breaking training change: Weights & Biases is replaced by Trackio, and the `training` extra installs `trackio`.
+
+| 0.4.4 | 0.7.0 |
+|---|---|
+| `--wandb.enable=true` | `--trackio.enable=true` |
+| `--wandb.disable_artifact=...` | `--trackio.disable_artifact=...` |
+| `--wandb.entity`, `--wandb.mode` | No equivalent |
+
+- Remote jobs with tracking need `--trackio.space_id`.
+- Checkpoints are no longer uploaded as artifacts by default.
+- `docker/docker_train_pi05.sh` and `docker/docker_train_groot.sh` already use `--trackio.*`.
+- **Do not mix interfaces.** An image or environment that still has the pre-0.7.0 training CLI rejects `--trackio.*`.
+
 ## Validation evidence
 
 - **Binary stack:** `rclpy`, OpenCV, torch and torchcodec imported in the recording environment. A six-frame synthetic camera/action episode was written, finalized, reopened, and decoded (`[3,48,64]`, expected action and task). A CUDA torchvision NMS kernel ran on the RTX 3090 Ti (driver 595.99.02).
@@ -55,3 +70,9 @@ All three environments installed on Linux x86-64 with Pixi 0.84.2. [pixi.lock](.
   
   `get_policy_class` and `make_pre_post_processors` are still imported from `lerobot.policies.factory`. `async_lerobot_policy.py` needed no change.
 - **Verified:** `pixi run -e jazzy-lerobot python -c "import crisp_gym.policy.lerobot_policy"` succeeds. The vla/vlsa modules were edited but not import-tested in this environment (they need the policy environment). The full recording run has not yet been re-run.
+
+### `sbatch sbatch.sh` (pi05 Apptainer training)
+
+- **Error:** `lerobot-train: error: unrecognized arguments: --trackio.enable=true --trackio.disable_artifact=false` (`.logs/job_99079.err`). The usage text in that log lists `--wandb.*` options and no `--trackio.*` options.
+- **Cause:** the launcher uses the 0.7.0 flags, but the `lerobot-train` executable inside `docker/pi05.sif` exposes the older W&B interface. The installed LeRobot version in the image has not been checked. [pi05.def](../docker/pi05.def) requests `lerobot[pi,training]==0.7.0`, so the `.sif` is probably older than the definition or was built with a different version; rebuilding changes the image, not the launcher.
+- **Next step:** run `apptainer exec docker/pi05.sif python -c "import lerobot; print(lerobot.__version__)"` and `apptainer exec docker/pi05.sif lerobot-train --help | grep -E "trackio|wandb"`, then rebuild the image if it is not 0.7.0. Keep `--trackio.*`; do not revert to `--wandb.*`.

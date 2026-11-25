@@ -1,11 +1,14 @@
 #!/bin/bash
 
 set -eu
-: "${DATASET_REPO:?Set DATASET_REPO to the training dataset Hub ID}"
-: "${POLICY_REPO:?Set POLICY_REPO to the destination policy Hub ID}"
+DATASET_REPO=IanHHH698/ian_telop_helloworld_v2
+POLICY_REPO=IanHHH698/pi05_testv0.7.0_v1
 OUTPUT_DIR=${OUTPUT_DIR:-/workspace/apptainer_outputs/pi05}
 JOB_NAME=${JOB_NAME:-pi05}
 STEPS=20000
+
+echo "DATASET_REPO=$DATASET_REPO"
+echo "POLICY_REPO=$POLICY_REPO"
 
 exec lerobot-train \
     --dataset.repo_id="$DATASET_REPO" \

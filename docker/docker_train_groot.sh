@@ -1,5 +1,9 @@
 #!/bin/bash
+# replace with your dataset repo e.g. cbrian/pi05_test_dataset
+DATASET_REPO=IanHHH698/ian_telop_helloworld_v2
 
+# replace with your policy repo e.g. cbrian/pi05_test_trained_policy
+POLICY_REPO=IanHHH698/pi05_testv0.7.0_v1
 set -eu
 : "${DATASET_REPO:?Set DATASET_REPO to the training dataset Hub ID}"
 : "${POLICY_REPO:?Set POLICY_REPO to the destination policy Hub ID}"
@@ -7,6 +11,9 @@ OUTPUT_DIR=${OUTPUT_DIR:-/workspace/outputs/groot}
 JOB_NAME=${JOB_NAME:-groot}
 
 STEPS=2000
+
+echo "DATASET_REPO=$DATASET_REPO"
+echo "POLICY_REPO=$POLICY_REPO"
 
 exec lerobot-train \
     --dataset.repo_id="$DATASET_REPO" \

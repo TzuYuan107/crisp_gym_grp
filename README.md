@@ -116,17 +116,26 @@ To simplify the setup, use the provided automation script to build your image an
 ./docker/build_and_run_docker.sh
 ```
 
-Inside the container, set the IDs again and choose one launcher. The container scripts log to Trackio rather than W&B.
+Inside the container, choose one launcher. The container scripts log to Trackio rather than W&B.
+Edit `DATASET_REPO` and `POLICY_REPO` directly in `docker/docker_train_pi05.sh` or
+`docker/docker_train_groot.sh`; exported repository IDs do not override these values.
+Both launchers print the configured IDs before starting training. When run through Slurm,
+these messages appear in the job's `.out` log.
 
 ```bash
 hf auth login
-export DATASET_REPO=your-account/your-dataset
-export POLICY_REPO=your-account/your-policy
 
 # train script for pi05
 ./docker/docker_train_pi05.sh
 # train script for groot
 ./docker/docker_train_groot.sh
+```
+
+For Slurm pi05 training, use the same IDs configured in `docker/docker_train_pi05.sh`:
+
+```bash
+mkdir -p .logs
+sbatch sbatch.sh
 ```
 
 ---

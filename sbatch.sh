@@ -9,14 +9,11 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=72:00:00               # Adjust this time limit as needed (HH:MM:SS)
-#SBATCH --output=/home_net/go68xoq/code/teleop/crisp_gym_vlsa/.logs/job_%j.out       # Saves terminal output to a logs folder
-#SBATCH --error=/home_net/go68xoq/code/teleop/crisp_gym_vlsa/.logs/job_%j.err        # Saves errors to a logs folder
+#SBATCH --output=/home_net/go68xoq/code/teleop/crisp_gym_grp/.logs/job_%j.out       # Saves terminal output to a logs folder
+#SBATCH --error=/home_net/go68xoq/code/teleop/crisp_gym_grp/.logs/job_%j.err        # Saves errors to a logs folder
 
 # Ensure the script starts in the directory where you ran sbatch
 cd "$SLURM_SUBMIT_DIR" || exit 1
-
-: "${DATASET_REPO:?Export the training dataset Hub ID before submitting}"
-: "${POLICY_REPO:?Export the destination policy Hub ID before submitting}"
 
 # ==========================================
 # 2. Environment & Container Execution
@@ -28,6 +25,8 @@ mkdir -p "$PWD/.cache/home" \
   "$PWD/.cache/torch" \
   "$PWD/.cache/triton" || exit 1
 
+mkdir -p "$PWD/.logs" || exit 1
+
 # We change 'shell' to 'exec', and append the python command at the very end
 apptainer exec --nv --cleanenv \
   --home "$PWD/.cache/home":/home/user_lerobot \
@@ -38,8 +37,6 @@ apptainer exec --nv --cleanenv \
   --env HF_TOKEN="${HF_TOKEN:-}" \
   --env TORCH_HOME=/workspace/.cache/torch \
   --env TRITON_CACHE_DIR=/workspace/.cache/triton \
-  --env DATASET_REPO="$DATASET_REPO" \
-  --env POLICY_REPO="$POLICY_REPO" \
   --env OUTPUT_DIR="${OUTPUT_DIR:-/workspace/apptainer_outputs/pi05}" \
   --env JOB_NAME="${JOB_NAME:-pi05}" \
   docker/pi05.sif \
