@@ -136,15 +136,18 @@ login inside a container is lost when the container is removed. Run one launcher
 ./docker/docker_train_groot.sh
 ```
 
-For Slurm pi05 training (Apptainer), there is no terminal for the login prompt, so the
+For Slurm training (Apptainer), there is no terminal for the login prompt, so the
 launcher would stop. Export your Hugging Face token before submitting; `sbatch.sh` forwards `HF_TOKEN`
-into the container. Use the same IDs configured in `docker/docker_train_pi05.sh`:
+into the container. Use the IDs configured in the policy's `docker/docker_train_<policy>.sh`.
+`sbatch.sh` picks the policy from the `POLICY` environment variable (default `pi05`) and
+runs `docker/<policy>.sif` with `docker/docker_train_<policy>.sh`:
 
 ```bash
 export HF_TOKEN=<your Hugging Face token>
 # On the cluster, build or pull the LeRobot 0.7.0 Apptainer image first (see below).
 mkdir -p .logs
-sbatch sbatch.sh
+sbatch sbatch.sh                                              # pi05
+POLICY=groot sbatch --job-name=groot_training sbatch.sh      # GR00T N1.7
 ```
 
 ### Apptainer images (`docker/*.sif`)
@@ -190,10 +193,7 @@ script, so after the first push of each image make it public once on GitHub
 the link). Later pushes keep that setting. Otherwise, for a private package, run
 `apptainer registry login --username <your_account> oras://ghcr.io` on the cluster first.
 
-`sbatch.sh` is currently written for `docker/pi05.sif` and
-`docker/docker_train_pi05.sh`; point it at `docker/groot.sif` and
-`docker/docker_train_groot.sh` for GR00T training. See the
-[migration notes](docs/lerobot-v0.7.0.md#pi05-apptainer-image) for build
+See the [migration notes](docs/lerobot-v0.7.0.md#pi05-apptainer-image) for build
 prerequisites and image verification.
 
 ### Adding a new policy
@@ -207,8 +207,7 @@ Replace `<policy>` with your policy name (e.g. `smolvla`). Use `docker/pi05.def`
 2. Add `docker/docker_train_<policy>.sh` (dataset/policy IDs and `lerobot-train` arguments).
 3. Nothing to edit in `build_sif.sh` and `push_sif.sh`: they list every `docker/<name>.def`
    and every built `docker/<name>.sif`, so the new policy appears in their menus automatically.
-4. Point `sbatch.sh` at `docker/<policy>.sif` and `docker/docker_train_<policy>.sh`
-   (it is currently hard-coded to pi05; also check its `--job-name`).
+4. Nothing to edit in `sbatch.sh` either: run `POLICY=<policy> sbatch sbatch.sh`.
 
 **Docker**
 

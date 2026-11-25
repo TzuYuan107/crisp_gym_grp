@@ -3,7 +3,7 @@
 # ==========================================
 # 1. Slurm Resource Requests (from your srun)
 # ==========================================
-#SBATCH --job-name=pi05_training
+#SBATCH --job-name=policy_training  # override with: sbatch --job-name=groot_training sbatch.sh
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:rtx4090:1
 #SBATCH --cpus-per-task=8
@@ -14,6 +14,16 @@
 
 # Ensure the script starts in the directory where you ran sbatch
 cd "$SLURM_SUBMIT_DIR" || exit 1
+
+# Policy to train: POLICY=<name> sbatch sbatch.sh (default pi05).
+# Uses docker/<name>.sif and docker/docker_train_<name>.sh.
+POLICY="${POLICY:-pi05}"
+SIF="docker/${POLICY}.sif"
+LAUNCHER="./docker/docker_train_${POLICY}.sh"
+if [ ! -f "$SIF" ] || [ ! -f "$LAUNCHER" ]; then
+  echo "Missing $SIF or $LAUNCHER for POLICY=$POLICY" >&2
+  exit 1
+fi
 
 # ==========================================
 # 2. Environment & Container Execution
@@ -37,7 +47,7 @@ apptainer exec --nv --cleanenv \
   --env HF_TOKEN="${HF_TOKEN:-}" \
   --env TORCH_HOME=/workspace/.cache/torch \
   --env TRITON_CACHE_DIR=/workspace/.cache/triton \
-  --env OUTPUT_DIR="${OUTPUT_DIR:-/workspace/apptainer_outputs/pi05}" \
-  --env JOB_NAME="${JOB_NAME:-pi05}" \
-  docker/pi05.sif \
-  ./docker/docker_train_pi05.sh
+  --env OUTPUT_DIR="${OUTPUT_DIR:-/workspace/apptainer_outputs/$POLICY}" \
+  --env JOB_NAME="${JOB_NAME:-$POLICY}" \
+  "$SIF" \
+  "$LAUNCHER"

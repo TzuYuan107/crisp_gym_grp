@@ -80,9 +80,9 @@ retained if the build fails.
   the Docker builder.
 
 [groot.def](../docker/groot.def) mirrors [Dockerfile.groot](../docker/Dockerfile.groot)
-(`lerobot[groot,training]==0.7.0`, ffmpeg 7 PPA). `sbatch.sh` is currently hard-coded
-to `docker/pi05.sif` and `docker/docker_train_pi05.sh`; use `docker/groot.sif` and
-`docker/docker_train_groot.sh` for GR00T.
+(`lerobot[groot,training]==0.7.0`, ffmpeg 7 PPA). `sbatch.sh` selects the policy with
+`POLICY` (default `pi05`): `POLICY=groot sbatch --job-name=groot_training sbatch.sh` runs
+`docker/groot.sif` with `docker/docker_train_groot.sh`.
 
 ### Transferring the image through a registry (ORAS)
 
