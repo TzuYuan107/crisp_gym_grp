@@ -1,8 +1,8 @@
 """Helper script to convert gripper actions to binary commands based on gripper state."""
 
+import einops
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-import einops
 from rich import print
 from rich.progress import Progress
 

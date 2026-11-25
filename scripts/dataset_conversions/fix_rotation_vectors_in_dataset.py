@@ -7,9 +7,9 @@ This script applies the same fix as in manipulator_env.py to ensure:
 
 import re
 
+import einops
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-import einops
 from numpy.typing import NDArray
 from rich import print
 from rich.progress import Progress

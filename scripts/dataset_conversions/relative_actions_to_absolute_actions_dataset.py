@@ -1,8 +1,8 @@
 """Helper script to convert a dataset from relative actions to absolute ones."""
 
+import einops
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-import einops
 from rich import print
 from rich.progress import Progress
 
