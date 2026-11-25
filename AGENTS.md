@@ -52,3 +52,7 @@ Add a small test for behaviour you change. Tests that need a robot, ROS bring-up
 - Secrets or tokens.
 
 Keep changes scoped to the task. Do not edit unrelated scripts "while you're there".
+
+## Upgrade to LeRobot v0.7.0
+
+- if you do modification for upgrade to LeRobot v0.7.0, please log what you do in docs/lerobot-v0.7.0.md 
