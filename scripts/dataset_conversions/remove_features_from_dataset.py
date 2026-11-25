@@ -4,7 +4,7 @@ import re
 
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.envs.utils import einops
+import einops
 from rich import print
 from rich.progress import Progress
 
@@ -127,10 +127,12 @@ with Progress() as progress:
             progress.update(progress_task, advance=1)
             new_dataset.save_episode()
 
-        new_dataset.add_frame(new_frame, task=frame.get("task", ""))
+        new_frame["task"] = frame["task"]
+        new_dataset.add_frame(new_frame)
 
     new_dataset.save_episode()
     progress.update(progress_task, advance=1)
+new_dataset.finalize()
 
 print("Conversion completed.")
 new_dataset.push_to_hub()

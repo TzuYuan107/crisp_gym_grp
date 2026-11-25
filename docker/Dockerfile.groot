@@ -15,13 +15,12 @@
 # This Dockerfile is designed for HuggingFace internal CI environments
 # that require GPU access. It starts from an NVIDIA CUDA base image.
 
-# docker build -f docker/Dockerfile.internal -t lerobot-internal .
+# docker build -f docker/Dockerfile.groot -t crisp-groot .
 
 # Configure the base image for CI with GPU access
-# TODO(Steven): Bump these versions
-ARG CUDA_VERSION=12.4.1
+ARG CUDA_VERSION=12.8.1
 ARG OS_VERSION=22.04
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${OS_VERSION}
+FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${OS_VERSION}
 
 # Define Python version argument
 ARG PYTHON_VERSION=3.12
@@ -44,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7 \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-       ffmpeg \ 
+       ffmpeg \
        python${PYTHON_VERSION} \
        python${PYTHON_VERSION}-venv \
        python${PYTHON_VERSION}-dev \
@@ -75,39 +74,11 @@ ENV HOME=/home/user_lerobot \
 # issues with MuJoCo and OpenGL drivers.
 RUN uv venv --python python${PYTHON_VERSION}
 
-# 1. Install Torch & Torchvision first (optimized for CUDA 12.1/12.4)
-RUN uv pip install --no-cache \
-    "torch>=2.2.1,<2.8.0" \
-    "torchvision>=0.21.0,<0.23.0" 
-
-RUN uv pip install --no-cache --force-reinstall \
-    "torchcodec==0.5.0" 
-    
-# 2. Install Flash Attention dependencies
-RUN uv pip install --no-cache ninja "packaging>=24.2,<26.0"
-
-# 3. Install Flash Attention (This may take 10+ minutes)
-RUN uv pip install "flash-attn==2.8.3" --no-build-isolation
-
-# Install Python dependencies for caching
-
-RUN uv pip install --no-cache "lerobot[groot] @ git+https://github.com/huggingface/lerobot@v0.4.4"
+# N1.7 uses SDPA by default; no external flash-attn build or Eagle tokenizer patch.
+COPY docker/training-constraints.txt .
+RUN uv pip install --no-cache -c training-constraints.txt "lerobot[groot,training]==0.7.0"
 
 RUN find .venv -name ptxas -exec chmod +x {} +
 
-# Copy the patch script from your local machine to the container
-COPY --chown=user_lerobot:user_lerobot patch_tokenizer.py /home/user_lerobot/patch_tokenizer.py
-
-# Ensure it has correct permissions
-RUN chmod +x /home/user_lerobot/patch_tokenizer.py
-
-# The entrypoint remains the same, running the script in the background
-RUN echo '#!/bin/bash\n\
-python /home/user_lerobot/patch_tokenizer.py &\n\
-exec "$@"' > /home/user_lerobot/entrypoint.sh && chmod +x /home/user_lerobot/entrypoint.sh
-
-# Copy local config files/scripts if you have them
-COPY --chown=user_lerobot:user_lerobot . .
-
-ENTRYPOINT ["/home/user_lerobot/entrypoint.sh"]
+COPY --chown=user_lerobot:user_lerobot docker/docker_train_groot.sh docker/
 CMD ["/bin/bash"]

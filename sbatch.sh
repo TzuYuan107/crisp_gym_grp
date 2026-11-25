@@ -15,14 +15,8 @@
 # Ensure the script starts in the directory where you ran sbatch
 cd "$SLURM_SUBMIT_DIR" || exit 1
 
-# Fail early with a clear message if WandB auth is not provided.
-if [ -z "${WANDB_API_KEY:-}" ]; then
-  echo "ERROR: WANDB_API_KEY is not set."
-  echo "Set it before submitting, e.g.:"
-  echo "  export WANDB_API_KEY=your_key_here"
-  echo "  sbatch --export=ALL,WANDB_API_KEY sbatch.sh"
-  exit 1
-fi
+: "${DATASET_REPO:?Export the training dataset Hub ID before submitting}"
+: "${POLICY_REPO:?Export the destination policy Hub ID before submitting}"
 
 # ==========================================
 # 2. Environment & Container Execution
@@ -32,8 +26,7 @@ fi
 mkdir -p "$PWD/.cache/home" \
   "$PWD/.cache/huggingface/lerobot" \
   "$PWD/.cache/torch" \
-  "$PWD/.cache/triton" \
-  "$PWD/.cache/wandb" || exit 1
+  "$PWD/.cache/triton" || exit 1
 
 # We change 'shell' to 'exec', and append the python command at the very end
 apptainer exec --nv --cleanenv \
@@ -45,7 +38,9 @@ apptainer exec --nv --cleanenv \
   --env HF_TOKEN="${HF_TOKEN:-}" \
   --env TORCH_HOME=/workspace/.cache/torch \
   --env TRITON_CACHE_DIR=/workspace/.cache/triton \
-  --env WANDB_DIR=/workspace/.cache/wandb \
-  --env WANDB_API_KEY="${WANDB_API_KEY}" \
+  --env DATASET_REPO="$DATASET_REPO" \
+  --env POLICY_REPO="$POLICY_REPO" \
+  --env OUTPUT_DIR="${OUTPUT_DIR:-/workspace/apptainer_outputs/pi05}" \
+  --env JOB_NAME="${JOB_NAME:-pi05}" \
   docker/pi05.sif \
   ./docker/docker_train_pi05.sh

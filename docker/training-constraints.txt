@@ -1,0 +1,4 @@
+# Matching PyTorch, torchvision and TorchCodec ABIs (PyPI Linux x86_64 wheels).
+torch==2.9.1
+torchvision==0.24.1
+torchcodec==0.9.1

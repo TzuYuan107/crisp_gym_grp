@@ -1,20 +1,18 @@
 [workspace]
 preview = ["pixi-build"]
 
-# Added pytorch and nvidia as secondary channels to help with binary discovery
-channels = ["conda-forge", "nvidia"]
+channels = ["conda-forge"]
 name = "crisp_gym"
 platforms = ["linux-64"]
 
 [activation]
 scripts = ["scripts/set_env.sh"]
-# Note: I used a dynamic path that works for both environments
 env = { LD_LIBRARY_PATH = "$PIXI_PROJECT_ROOT/.pixi/envs/$PIXI_ENVIRONMENT_NAME/lib:$LD_LIBRARY_PATH" }
 
 [dependencies]
 python = "3.12.*"
 compilers = "*"
-cmake = "*"
+cmake = ">=3.29.0.1,<4.2"
 pkg-config = "*"
 make = "*"
 ninja = "*"
@@ -22,10 +20,9 @@ typing_inspect = ">=0.9.0,<0.10"
 libstdcxx-ng = ">=13"
 numpy = ">=2.0.0, <2.3"
 pip = ">=24.0"
-packaging = "<26.0"
-setuptools = "<81.0.0"
-# Keep the conda-provided Pillow compatible with lerobot[groot] (<13).
-pillow = ">=10,<13"
+packaging = ">=24.2,<27"
+setuptools = ">=71,<85"
+pillow = ">=10,<14"
 ffmpeg = ">8"
 libgcc-ng = ">=13.2"
 
@@ -36,11 +33,9 @@ libgl-devel = "*"
 [environments]
 dev = { features = ["dev"] }
 jazzy = { features = ["jazzy"] }
-jazzy-lerobot = { features = ["jazzy", "lerobot", "dev"]}
-jazzy-pi05 = { features = ["jazzy", "lerobot-pi05", "dev"] }
-jazzy-groot = { features = ["jazzy", "lerobot-groot", "dev"] }
-jazzy-pi05-aegis = { features = ["jazzy", "lerobot-pi05", "dev", "aegis"] }
-jazzy-groot-aegis = { features = ["jazzy", "lerobot-groot", "dev", "aegis"] }
+jazzy-lerobot = { features = ["jazzy", "record", "dev"] }
+jazzy-policy = { features = ["jazzy", "policy", "dev"] }
+jazzy-policy-aegis = { features = ["jazzy", "policy", "dev", "aegis"] }
 
 # --- SHARED FEATURES ---
 [feature.dev.pypi-dependencies]
@@ -59,48 +54,22 @@ colcon-common-extensions = "*"
 rosdep = "*"
 ros-jazzy-rmw-cyclonedds-cpp = "*"
 ros-jazzy-image-transport-plugins = "*"
-# Cap below the conda-forge 4.13.0 build so it doesn't get mapped to the pypi
-# opencv-python-headless==4.13.0, which conflicts with lerobot's <4.13.0 pin
-# (via ros-jazzy-cv-bridge, which pulls in py-opencv/libopencv).
-py-opencv = "<4.13"
-libopencv = "<4.13"
+# cv-bridge and LeRobot share the conda OpenCV binary.
+py-opencv = ">=4.9,<4.14"
 
-# --- PI0.5 SPECIFIC FEATURE ---
-[feature.lerobot.dependencies]
+# --- RECORDING ---
+[feature.record.dependencies]
 pynput = "*"
 
-[feature.lerobot.pypi-dependencies]
-lerobot = { git = "https://github.com/huggingface/lerobot", tag = "v0.4.4"}
+[feature.record.pypi-dependencies]
+lerobot = { version = "==0.7.0", extras = ["dataset"] }
 
-# --- PI0.5 SPECIFIC FEATURE ---
-[feature.lerobot-pi05.dependencies]
+# --- PI0.5 AND GR00T TRAINING / DEPLOYMENT ---
+[feature.policy.dependencies]
 pynput = "*"
 
-[feature.lerobot-pi05.pypi-dependencies]
-lerobot = { git = "https://github.com/huggingface/lerobot", tag = "v0.4.4", extras = ["pi"] }
-# Pinned to a commit, not the "pi" extra's branch ref (fix/lerobot_openpi) -- a branch can't be
-# durably confirmed unchanged, so pixi was re-resolving both jazzy-pi05 and jazzy-pi05-aegis's
-# entire pypi dependency graph (several minutes) on every single `pixi run`. This is the exact
-# commit that branch already resolved to.
-transformers = { git = "https://github.com/huggingface/transformers", rev = "dcddb970176382c0fcf4521b0c0e6fc15894dfe0" }
-
-# --- GROOT SPECIFIC FEATURE ---
-
-[feature.lerobot-groot.dependencies]
-pynput = "*"
-cuda-toolkit = "12.6.*" 
-wheel = "*"
-
-[feature.lerobot-groot.pypi-options]
-# This mimics the critical 'no-build-isolation' from your pyproject
-no-build-isolation = ["flash-attn"]
-
-[feature.lerobot-groot.pypi-dependencies]
-torch = ">=2.2.1,<2.8.0"
-torchcodec = "==0.5.0"
-torchvision = ">=0.21.0,<0.23.0"
-flash-attn = ">=2.5.9,<3.0.0"
-lerobot = { git = "https://github.com/huggingface/lerobot", tag = "v0.4.4", extras = ["groot", "peft"] }
+[feature.policy.pypi-dependencies]
+lerobot = { version = "==0.7.0", extras = ["training", "pi", "groot"] }
 
 # --- AEGIS SAFETY-FILTER (crisp_gym.safety, mode="point_cloud") SPECIFIC FEATURE ---
 [feature.aegis.dependencies]
@@ -116,7 +85,7 @@ zai-sdk = "*"
 # isn't a pypi dependency at all -- this task copies the former and downloads the latter into
 # GroundingDINO/ (repo root, sibling to models/), matching vlsa_config.yaml's
 # groundingdino_config_path/groundingdino_checkpoint_path. Run once per clone with
-# `pixi run -e jazzy-pi05-aegis download-groundingdino` (or jazzy-groot-aegis) from repo root.
+# `pixi run -e jazzy-policy-aegis download-groundingdino` from repo root.
 download-groundingdino = { cmd = """
 mkdir -p GroundingDINO && \
 test -f GroundingDINO/GroundingDINO_SwinT_OGC.py || python -c "import groundingdino, shutil, os; shutil.copy(os.path.join(os.path.dirname(groundingdino.__file__), 'config', 'GroundingDINO_SwinT_OGC.py'), 'GroundingDINO/GroundingDINO_SwinT_OGC.py')" && \
@@ -131,8 +100,3 @@ crisp-python = { git = "https://github.com/brianchang1025/crisp_py_panda"}
 
 [tasks]
 configure = "bash scripts/configure.sh"
-fix-tokenizer = { cmd = """
-python -c "import json, os; p=os.path.expanduser('~/.cache/huggingface/lerobot/lerobot/eagle2hg-processor-groot-n1p5/tokenizer_config.json'); (j:=json.load(open(p))).update({'fix_mistral_regex':True}) or json.dump(j,open(p,'w'),indent=2) if os.path.exists(p) else print('Model not yet downloaded, skipping patch.')"
-""" }
-nvcc_ok = "nvcc --version"
-torch_ok = "python -c 'import torch;print(torch.__version__, torch.version.cuda);import flash_attn_2_cuda as _;print(\"flash-attn: OK\")'"

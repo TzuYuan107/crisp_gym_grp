@@ -10,10 +10,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pandas as pd
 from huggingface_hub import snapshot_download
-from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.datasets.utils import load_episodes, load_info, write_episodes, write_json, write_tasks
+from huggingface_hub.utils import validate_repo_id
+from lerobot.datasets.dataset_tools import modify_tasks
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.utils.constants import HF_LEROBOT_HOME
 
 
 def main() -> None:
@@ -32,83 +33,22 @@ def main() -> None:
 
     src_repo = args.repo_id
     out_repo = args.output_repo_id
+    validate_repo_id(out_repo)
     new_task = args.task
 
-    # Load source metadata (this will download metadata files if needed)
-    print(f"Loading metadata for {src_repo}...")
-    meta = LeRobotDatasetMetadata(src_repo, force_cache_sync=True)
+    out_root = HF_LEROBOT_HOME / out_repo
+    if out_root.exists() and not args.force_overwrite:
+        sys.exit(f"Output path {out_root} already exists. Use --force-overwrite to replace.")
 
-    # Ensure episodes are loaded
-    episodes = meta.episodes if getattr(meta, "episodes", None) is not None else load_episodes(meta.root)
-
-    try:
-        import datasets
-    except Exception:
-        print("Missing dependency 'datasets'. Please install 'datasets' package.", file=sys.stderr)
-        sys.exit(2)
-
-    if not isinstance(episodes, datasets.Dataset):
-        print("Could not load episodes dataset", file=sys.stderr)
-        sys.exit(2)
-
-    # Replace tasks for every episode
-    print(f"Setting task for {len(episodes)} episodes to: {new_task}")
-
-    def _set_task(example: dict) -> dict:
-        example["tasks"] = [new_task]
-        return example
-
-    episodes_mod = episodes.map(_set_task)
-
-    # Prepare output local directory
-    out_root = meta.root.parent / out_repo
-    if out_root.exists():
-        if args.force_overwrite:
+    out_root.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=out_root.parent) as tmp:
+        staging = Path(tmp) / "dataset"
+        snapshot_download(repo_id=src_repo, repo_type="dataset", local_dir=staging)
+        # 0.7 updates every episode shard as well as frame indices and typed metadata.
+        modify_tasks(LeRobotDataset(out_repo, root=staging), new_task=new_task)
+        if out_root.exists():
             shutil.rmtree(out_root)
-        else:
-            print(f"Output path {out_root} already exists. Use --force-overwrite to replace.")
-            sys.exit(1)
-
-    # The metadata object may have been downloaded with only meta files.
-    # Download the full repository (data + videos) to a temporary folder and copy from there.
-    print(f"Downloading full dataset {src_repo} to temporary folder...")
-    tmp_dir = Path(tempfile.mkdtemp(prefix="lr_ds_"))
-    snapshot_download(repo_id=src_repo, repo_type="dataset", local_dir=str(tmp_dir))
-    # snapshot_download places files under tmp_dir / <repo_id-basename>
-    src_root = tmp_dir / Path(src_repo).name
-    if not src_root.exists():
-        # fallback: sometimes snapshot_download writes directly into tmp_dir
-        src_root = tmp_dir
-
-    print(f"Copying dataset files to {out_root}... (this may take a while for large datasets)")
-    shutil.copytree(src_root, out_root)
-
-    # Write modified episodes metadata
-    print("Writing modified episodes metadata...")
-    write_episodes(episodes_mod, out_root)
-
-    # Write tasks parquet (single task)
-    print("Updating tasks list to single new task...")
-    tasks_df = pd.DataFrame({"task_index": [0]}, index=[new_task])
-    write_tasks(tasks_df, out_root)
-
-    # tasks.parquet above is rebuilt down to exactly one row (task_index=0), but data/*.parquet's
-    # frame-level task_index column is untouched by shutil.copytree above -- if the source dataset
-    # ever had more than one distinct task (e.g. some episodes originally empty/different before
-    # being unified here, common after merging datasets with inconsistent task labels), those
-    # frames keep whatever task_index they already had, which no longer has a matching row in the
-    # freshly-rebuilt tasks.parquet. That mismatch throws IndexError: single positional indexer is
-    # out-of-bounds the moment LeRobotDataset.__getitem__ hits one of those frames. Remap every
-    # frame to task_index=0 so the output is guaranteed self-consistent.
-    print("Remapping data/*.parquet task_index to 0 (matching the single unified task)...")
-    n_remapped = 0
-    for data_file in sorted(Path(out_root).glob("data/chunk-*/file-*.parquet")):
-        df = pd.read_parquet(data_file)
-        n_remapped += int((df["task_index"] != 0).sum())
-        df["task_index"] = 0
-        df.to_parquet(data_file, index=False)
-    if n_remapped:
-        print(f"  remapped {n_remapped} frame(s) to task_index=0.")
+        staging.rename(out_root)
 
     # meta/stats.json's task_index entry (min/max/mean/etc.) reflects whatever distribution of
     # indices existed before the remap above -- now stale if there was more than one. Recompute
@@ -124,11 +64,6 @@ def main() -> None:
             }
             stats_path.write_text(json.dumps(stats, indent=2))
             print("Corrected meta/stats.json task_index stats to match.")
-
-    # Update info.json total_tasks
-    info = load_info(out_root)
-    info["total_tasks"] = 1
-    write_json(info, Path(out_root) / "meta" / "info.json")
 
     print("Done. Local modified dataset is at:", out_root)
 

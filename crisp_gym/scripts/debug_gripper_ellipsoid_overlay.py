@@ -28,8 +28,8 @@ control graph, so instantiating a second one alongside whatever's already drivin
 risks conflicting with it. This script only ever reads, never publishes/controls anything.
 
 Usage (needs the robot bringup, robot controller, and camera all running, inside the
-jazzy-pi05-aegis pixi env):
-    pixi run -e jazzy-pi05-aegis python3 crisp_gym/scripts/debug_gripper_ellipsoid_overlay.py \\
+jazzy-policy-aegis pixi env):
+    pixi run -e jazzy-policy-aegis python3 crisp_gym/scripts/debug_gripper_ellipsoid_overlay.py \\
         --pose-topic /left/current_pose
 
 Keyboard controls (rotation nudges are in the camera's own local frame; translation nudges are

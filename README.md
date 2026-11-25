@@ -6,7 +6,7 @@
 
 - **Full Support:** Fully supports the CRISP ecosystem and the `CRISP_PY` API.
 - **Data Recording:** Records manipulation data in the `LeRobotDataset v3.0` format.
-- **Environment & Deployment:** Provides Pixi environments for `pi0.5` and `Groot N1.5` along with fast deployment scripts.
+- **Environment & Deployment:** PI0.5 and GR00T N1.7 share one policy environment.
 
 ## **Prerequisites**
 
@@ -41,26 +41,24 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 #export CRISP_CONFIG_PATH="/path/to/config1:/path/to/config2"
 ```
 
-You can now install the Pixi environments. We provide separate environments for the **PI05** and the **Nvidia GROOT N1.5** models. 
+LeRobot 0.7.0 uses one environment for **PI0.5 and NVIDIA GR00T N1.7**. Use the smaller dataset environment on recording machines. See the [migration and validation notes](docs/lerobot-v0.7.0.md) before reusing a checkpoint.
 
-```jsx
+```bash
 # lerobot dataset record env
 pixi install -e jazzy-lerobot
 pixi run -e jazzy-lerobot python -c "import crisp_gym"
 
-# pi05 pixi env
-pixi install -e jazzy-pi05
-pixi run -e jazzy-pi05 python -c "import crisp_gym" 
+# training and deployment (either policy)
+pixi install -e jazzy-policy
 
-# groot pixi env
-pixi install -e jazzy-groot
-pixi run -e jazzy-groot python -c "import crisp_gym"
+# deployment with Aegis point-cloud dependencies
+pixi install -e jazzy-policy-aegis
 ```
 
 You can verify if your configuration has loaded correctly by running the following command:
 
 ```bash
-pixi run -e jazzy-lerob crisp-check-config
+pixi run -e jazzy-lerobot crisp-check-config
 ```
 
 if this work we can move to next step 
@@ -83,9 +81,9 @@ Once the recording interface opens, you can select your hardware settings for th
 You can use the `--resume` flag to continue recording to an existing dataset. Additionally, use the `--recording-manager-type` argument to choose between `keyboard` or `ros` control. If you select `ros`, you can manage the recording process directly using the buttons on the leader arm.
 
 ```bash
-pipixi run -e jazzy-pi05 crisp-record-leader-follower \
+pixi run -e jazzy-lerobot crisp-record-leader-follower \
    --repo-id <your_huggingface_account>/<repo_name> --task <the task description> \
-   --num-episodes <int> --recoring-manager-type "ros"
+   --num-episodes <int> --recording-manager-type "ros"
    
 ```
 
@@ -101,19 +99,15 @@ When using the ROS manager, you can control the recording using the buttons on t
 
 ## Fine-tuning
 
-Once you have finished collecting your dataset, you can begin fine-tuning the VLA model. We provide simple training scripts, `train_pi05.sh` and `train_groot.sh`, located in the `scripts/` folder. **Note:** Before running these, you must edit the arguments within the files (such as `dataset_repo` and `policy_repo`)
+Set your source dataset and destination policy Hub IDs, then run one launcher:
 
-```jsx
-	// pi05
-	chmod +x scripts/train_pi05.sh
-	scripts/train_pi05.sh
-	
-	// groot
-	chmod +x scripts/train_pi05.sh
-	scripts/train_pi05.sh
+```bash
+export DATASET_REPO=your-account/your-dataset
+export POLICY_REPO=your-account/your-policy
+./scripts/train_pi05.sh  # or ./scripts/train_groot.sh
 ```
 
-For users who prefer containerized environments, we provide dedicated **Dockerfiles** for both the **PI05** and **Nvidia GROOT N1.5** models in the `docker/` folder.
+The `docker/` folder also provides container training launchers.
 
 To simplify the setup, use the provided automation script to build your image and launch the container:
 
@@ -122,12 +116,12 @@ To simplify the setup, use the provided automation script to build your image an
 ./docker/build_and_run_docker.sh
 ```
 
-Once you have entered the container, you can find the training scripts for the **PI05** and **GROOT** policies in the `/workspace/docker` directory. Simply edit the arguments within these scripts to match your requirements and run them to begin the training process.
+Inside the container, set the IDs again and choose one launcher. The container scripts log to Trackio rather than W&B.
 
 ```bash
-# log in to hf and wandb for the first time entering the container
-hf auth login 
-wandb login 
+hf auth login
+export DATASET_REPO=your-account/your-dataset
+export POLICY_REPO=your-account/your-policy
 
 # train script for pi05
 ./docker/docker_train_pi05.sh
@@ -143,7 +137,7 @@ Once you have finished fine-tuning your model or have downloaded a pre-trained p
 
 ```bash
 #deploy pi05 policy
-pixi run -e jazzy-pi05 crisp-deploy-vla --path <your policy path> --task <the task description> \
+pixi run -e jazzy-policy crisp-deploy-vla --path <your policy path> --task <the task description> \
 --repo-id <your_huggingface_account>/<repo_name>
 ```
 

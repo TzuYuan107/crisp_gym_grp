@@ -9,7 +9,7 @@ import re
 
 import numpy as np
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.envs.utils import einops
+import einops
 from numpy.typing import NDArray
 from rich import print
 from rich.progress import Progress
@@ -215,11 +215,13 @@ with Progress() as progress:
                 else:
                     new_frame[key] = frame[key].cpu().numpy().squeeze()
 
-        new_dataset.add_frame(new_frame, task=frame.get("task", ""))
+        new_frame["task"] = frame["task"]
+        new_dataset.add_frame(new_frame)
 
     # Save final episode
     new_dataset.save_episode()
     progress.update(progress_task, advance=1)
+new_dataset.finalize()
 
 print("\nRotation vector fix completed.")
 print(f"Processed {current_episode_index + 1} episodes")

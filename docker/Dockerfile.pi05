@@ -19,7 +19,7 @@
 
 # Configure the base image for CI with GPU access
 # TODO(Steven): Bump these versions
-ARG CUDA_VERSION=12.4.1
+ARG CUDA_VERSION=12.8.1
 ARG OS_VERSION=22.04
 FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${OS_VERSION}
 
@@ -75,13 +75,11 @@ ENV HOME=/home/user_lerobot \
 # issues with MuJoCo and OpenGL drivers.
 RUN uv venv --python python${PYTHON_VERSION}
 
-# Install LeRobot v0.4.4 from Git
-RUN uv pip install --no-cache "lerobot[pi] @ git+https://github.com/huggingface/lerobot@v0.4.4"
+COPY docker/training-constraints.txt .
+RUN uv pip install --no-cache -c training-constraints.txt "lerobot[pi,training]==0.7.0"
 RUN find .venv -name ptxas -exec chmod +x {} +
 
-# Copy the rest of the application source code
-# Make sure to have the git-LFS files for testing
-COPY --chown=user_lerobot:user_lerobot . .
+COPY --chown=user_lerobot:user_lerobot docker/docker_train_pi05.sh docker/
 
 # Set the default command
 CMD ["/bin/bash"]

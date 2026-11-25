@@ -30,8 +30,8 @@ above entirely); instead it measures height from the full cloud and horizontal e
 the cloud's uncontaminated top slice. Neither ellipsoid is used by the deployed safety filter
 yet -- this script is for comparing which one tracks the real object better before deciding.
 
-Usage (needs the robot bringup + camera running, inside the jazzy-pi05-aegis pixi env):
-    pixi run -e jazzy-pi05-aegis python3 crisp_gym/scripts/debug_obstacle_pointcloud.py
+Usage (needs the robot bringup + camera running, inside the jazzy-policy-aegis pixi env):
+    pixi run -e jazzy-policy-aegis python3 crisp_gym/scripts/debug_obstacle_pointcloud.py
 
 Opens the saved HTML in a browser to rotate/zoom/pan.
 """

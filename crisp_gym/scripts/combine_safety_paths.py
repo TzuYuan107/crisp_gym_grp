@@ -15,7 +15,7 @@ episodes) on top of it -- e.g. to see how the executed path varies episode-to-ep
 the same obstacle.
 
 Usage:
-    pixi run -e jazzy-groot python3 crisp_gym/scripts/combine_safety_paths.py \\
+    pixi run -e jazzy-policy python3 crisp_gym/scripts/combine_safety_paths.py \\
         --base-dir outputs/safety/MMpath \\
         outputs/safety/MMpath/trajectory_actual.npy \\
         outputs/safety/episode_0002/trajectory_actual.npy \\
