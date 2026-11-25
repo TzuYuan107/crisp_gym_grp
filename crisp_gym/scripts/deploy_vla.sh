@@ -4,7 +4,7 @@
 # Leave a value empty ("") to use the default from deploy_vla.py.
 
 # ============================ EDIT HERE ============================
-REPO_ID="username/recordvideo12"      # dataset repo id
+REPO_ID="IanHHH698/eval_gr00t_v2_0.7.0"      # evaluation result repo
 TASK="close the teacup drawer"        # language instruction
 NUM_EPISODES=20                       # number of episodes to record
 FPS=15                                # recording frames per second
