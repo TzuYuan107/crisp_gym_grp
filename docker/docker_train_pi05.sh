@@ -7,6 +7,16 @@ OUTPUT_DIR=${OUTPUT_DIR:-/workspace/apptainer_outputs/pi05}
 JOB_NAME=${JOB_NAME:-pi05}
 STEPS=20000
 
+# Training needs Hugging Face access; log in interactively unless HF_TOKEN or a saved login exists.
+if ! hf auth whoami >/dev/null 2>&1; then
+    if [ -t 0 ]; then
+        hf auth login
+    else
+        echo "Not logged in to Hugging Face. Set HF_TOKEN or run 'hf auth login' first." >&2
+        exit 1
+    fi
+fi
+
 echo "DATASET_REPO=$DATASET_REPO"
 echo "POLICY_REPO=$POLICY_REPO"
 

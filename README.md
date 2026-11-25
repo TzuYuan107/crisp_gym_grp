@@ -122,37 +122,51 @@ Edit `DATASET_REPO` and `POLICY_REPO` directly in `docker/docker_train_pi05.sh` 
 Both launchers print the configured IDs before starting training. When run through Slurm,
 these messages appear in the job's `.out` log.
 
-```bash
-hf auth login
+Training downloads the dataset and base model from, and pushes the trained policy to,
+the Hugging Face Hub, so it needs a Hugging Face login with write access. Both launchers
+check this by default: if you are not logged in (no saved login and no `HF_TOKEN`), they run
+`hf auth login` for you when started from a terminal, or stop with an error when there is
+no terminal (e.g. a Slurm job). You can also log in yourself beforehand; note that a
+login inside a container is lost when the container is removed. Run one launcher:
 
+```bash
 # train script for pi05
 ./docker/docker_train_pi05.sh
 # train script for groot
 ./docker/docker_train_groot.sh
 ```
 
-For Slurm pi05 training, use the same IDs configured in `docker/docker_train_pi05.sh`:
+For Slurm pi05 training (Apptainer), there is no terminal for the login prompt, so the
+launcher would stop. Export your Hugging Face token before submitting; `sbatch.sh` forwards `HF_TOKEN`
+into the container. Use the same IDs configured in `docker/docker_train_pi05.sh`:
 
 ```bash
-# On the cluster, build the LeRobot 0.7.0 Apptainer image first.
-./docker/build_pi05_sif.sh
+export HF_TOKEN=<your Hugging Face token>
+# On the cluster, build or pull the LeRobot 0.7.0 Apptainer image first (see below).
 mkdir -p .logs
 sbatch sbatch.sh
 ```
 
-The build produces `docker/pi05.sif`, which `sbatch.sh` uses. If an older image
-already exists, rebuild it with `./docker/build_pi05_sif.sh --force`. The
-cluster build uses `--ignore-fakeroot-command` to avoid a host/container glibc
-incompatibility; it still needs suitable user-namespace permissions. Build on a
-node with internet access and sufficient temporary and cache space.
+### Apptainer images (`docker/*.sif`)
 
-Alternatively, on a local machine with Docker, run
-`./docker/build_pi05_sif.sh --docker` (add `--force` to replace an existing
-image). This uses a **privileged** Docker container, so use it only if you trust
-the builder image.
+`./docker/build_sif.sh` builds an image from a definition file in `docker/`. It asks
+which image to build (every `docker/<name>.def`, currently
+[pi05.def](docker/pi05.def) and [groot.def](docker/groot.def) for GR00T N1.7) and
+whether to run Apptainer directly or through Docker. To support a new policy, add
+`docker/<name>.def`; it appears in the menu automatically. The result is
+`docker/<name>.sif`, and an existing image is only replaced if you confirm.
+
+- **On the cluster:** choose *Apptainer*. The build uses `--ignore-fakeroot-command`
+  to avoid a host/container glibc incompatibility; it still needs suitable
+  user-namespace permissions, internet access, and enough temporary and cache space.
+- **On a local machine without Apptainer:** choose *Docker*. This runs a
+  **privileged** container, so use it only if you trust the builder image.
 
 If the cluster cannot receive file transfers, push the image to an OCI registry
-(default GHCR) and pull it on the cluster, which needs only Apptainer:
+(default GHCR) and pull it on the cluster, which needs only Apptainer.
+`./docker/push_sif.sh` asks which built image to push, your registry account, the
+registry host (default `ghcr.io`), the tag (default `0.7.0`), and whether to use
+Apptainer or Docker.
 
 `<your_account>` is your **GitHub username**. Before pushing, create a GitHub
 **personal access token (classic)** at GitHub → Settings → Developer settings →
@@ -161,22 +175,55 @@ Personal access tokens → Tokens (classic), with the `write:packages` scope
 script prompts for a password, paste the token (not your GitHub password).
 
 ```bash
-# Local machine: you are prompted for the token
-./docker/push_pi05_sif.sh --account <your_account> --docker   # drop --docker if Apptainer is installed
+# Local machine: answer the prompts, then paste the token when asked for a password
+./docker/push_sif.sh
 
-# Cluster: pull into the path used by sbatch.sh (use the command the script prints)
+# Cluster: pull into the path used by sbatch.sh (the script prints the exact command)
 apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
 # example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
+# GR00T N1.7: apptainer pull docker/groot.sif oras://ghcr.io/<your_account>/groot:0.7.0
 ```
 
-Use `--registry` and `--tag` to change the registry or tag. A new GHCR package is
-**private** and GitHub offers no way to change this from the script, so after the
-first push make it public once on GitHub (`pi05` package → Package settings →
-Danger Zone → Change visibility; the script prints the link). Later pushes keep
-that setting. Otherwise, for a private
-package, run `apptainer registry login --username <your_account> oras://ghcr.io`
-on the cluster first. See the [migration notes](docs/lerobot-v0.7.0.md#pi05-apptainer-image) for
-build prerequisites and image verification.
+A new GHCR package is **private** and GitHub offers no way to change this from the
+script, so after the first push of each image make it public once on GitHub
+(package → Package settings → Danger Zone → Change visibility; the script prints
+the link). Later pushes keep that setting. Otherwise, for a private package, run
+`apptainer registry login --username <your_account> oras://ghcr.io` on the cluster first.
+
+`sbatch.sh` is currently written for `docker/pi05.sif` and
+`docker/docker_train_pi05.sh`; point it at `docker/groot.sif` and
+`docker/docker_train_groot.sh` for GR00T training. See the
+[migration notes](docs/lerobot-v0.7.0.md#pi05-apptainer-image) for build
+prerequisites and image verification.
+
+### Adding a new policy
+
+Replace `<policy>` with your policy name (e.g. `smolvla`). Use `docker/pi05.def`,
+`docker/Dockerfile.pi05` and `docker/docker_train_pi05.sh` as templates.
+
+**Apptainer (cluster)**
+
+1. Add `docker/<policy>.def` (change the extras in `lerobot[<extra>,training]==0.7.0`).
+2. Add `docker/docker_train_<policy>.sh` (dataset/policy IDs and `lerobot-train` arguments).
+3. Nothing to edit in `build_sif.sh` and `push_sif.sh`: they list every `docker/<name>.def`
+   and every built `docker/<name>.sif`, so the new policy appears in their menus automatically.
+4. Point `sbatch.sh` at `docker/<policy>.sif` and `docker/docker_train_<policy>.sh`
+   (it is currently hard-coded to pi05; also check its `--job-name`).
+
+**Docker**
+
+1. Add `docker/Dockerfile.<policy>`.
+2. Add `docker/docker_train_<policy>.sh` (the Dockerfile copies it into the image).
+3. Add `"Dockerfile.<policy>"` to the `DOCKERFILES` list in `docker/build_and_run_docker.sh`.
+
+Also check:
+- Both launchers must use `--trackio.*` (not `--wandb.*`) arguments and keep the Hugging Face
+  login check from the existing launchers.
+- If the policy needs different dependencies, update `docker/training-constraints.txt` (shared by
+  all images) and the migration notes.
+- Optionally add `scripts/train_<policy>.sh` for training outside a container.
+- For deployment, check that the policy is covered by the `jazzy-policy` Pixi environment (`pixi.toml`).
+- `.sif` files are git-ignored; share a new image through `push_sif.sh` and make its GHCR package public once.
 
 ---
 

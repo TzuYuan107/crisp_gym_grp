@@ -1,0 +1,77 @@
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-base-ubuntu22.04
+
+%arguments
+    PYTHON_VERSION=3.12
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export MUJOCO_GL=egl
+    export PATH=/lerobot/.venv/bin:$PATH
+    export CUDA_VISIBLE_DEVICES=0
+    export TEST_TYPE=single_gpu
+    export DEVICE=cuda
+
+    # Direct caches to the same paths as docker/Dockerfile.groot; sbatch.sh-style
+    # launchers can override them with --env.
+    export HOME=/home/user_lerobot
+    export HF_HOME=/home/user_lerobot/.cache/huggingface
+    export HF_LEROBOT_HOME=/home/user_lerobot/.cache/huggingface/lerobot
+    export TORCH_HOME=/home/user_lerobot/.cache/torch
+    export TRITON_CACHE_DIR=/home/user_lerobot/.cache/triton
+
+%files
+    docker/training-constraints.txt /lerobot/training-constraints.txt
+
+%post
+    PYTHON_VERSION={{ PYTHON_VERSION }}
+
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Etc/UTC
+
+    # Launchpad PPAs intermittently return 503; retry downloads instead of failing the build.
+    echo 'Acquire::Retries "10";' > /etc/apt/apt.conf.d/80-retries
+
+    apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common build-essential git curl \
+        libglib2.0-0 libgl1-mesa-glx libegl1-mesa \
+        libusb-1.0-0-dev speech-dispatcher libgeos-dev portaudio19-dev \
+        cmake pkg-config ninja-build
+
+    # Same PPAs as docker/Dockerfile.groot (ffmpeg 7).
+    add-apt-repository -y ppa:deadsnakes/ppa
+    add-apt-repository -y ppa:ubuntuhandbook1/ffmpeg7
+
+    apt-get update
+    for attempt in 1 2 3 4 5; do
+        apt-get install -y --no-install-recommends --fix-missing \
+           ffmpeg \
+           python${PYTHON_VERSION} \
+           python${PYTHON_VERSION}-venv \
+           python${PYTHON_VERSION}-dev && break
+        [ "$attempt" -lt 5 ] || exit 1
+        echo "apt install failed (attempt $attempt); retrying in 30s"
+        sleep 30
+        apt-get update
+    done
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    mv /root/.local/bin/uv /usr/local/bin/uv
+
+    mkdir -p /home/user_lerobot/.cache
+
+    cd /lerobot
+
+    /usr/local/bin/uv venv --python python${PYTHON_VERSION} /lerobot/.venv
+
+    # N1.7 uses SDPA by default; no external flash-attn build or Eagle tokenizer patch.
+    export UV_PROJECT_ENVIRONMENT=/lerobot/.venv
+    /usr/local/bin/uv pip install --python /lerobot/.venv/bin/python --no-cache \
+        -c training-constraints.txt "lerobot[groot,training]==0.7.0"
+
+    find /lerobot/.venv -name ptxas -exec chmod +x {} +
+
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+%runscript
+    exec /bin/bash "$@"

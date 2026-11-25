@@ -47,67 +47,75 @@ The [v0.7.0 release notes](https://github.com/huggingface/lerobot/releases/tag/v
 
 ## PI0.5 Apptainer image
 
-For Apptainer training, build the image from [pi05.def](../docker/pi05.def)
-before submitting the Slurm job. From the repository root on the cluster:
+For Apptainer training, build the image before submitting the Slurm job. From
+the repository root:
 
 ```bash
-# Optional: choose locations with enough space for the build and downloads.
+# Optional (cluster): choose locations with enough space for the build and downloads.
 export APPTAINER_TMPDIR=/path/to/large/tmp
 export APPTAINER_CACHEDIR=/path/to/large/cache
 mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
-./docker/build_pi05_sif.sh
+./docker/build_sif.sh
 ```
 
-The script writes `docker/pi05.sif`, the path used by `sbatch.sh`. To replace a
-stale image, add `--force`; the existing image is retained if the build fails.
-The cluster build uses `--ignore-fakeroot-command` to avoid injecting a host
-fakeroot library that can require a newer glibc than the Ubuntu 22.04 image.
-This does not require sudo if the cluster permits the necessary user namespaces,
-but may fail if its fakeroot configuration is insufficient; ask the cluster
-administrator or use the local Docker option below.
+[build_sif.sh](../docker/build_sif.sh) is interactive. It lists every
+`docker/<name>.def` and asks which to build: [pi05.def](../docker/pi05.def) gives
+`docker/pi05.sif` (the path used by `sbatch.sh`), and [groot.def](../docker/groot.def)
+gives `docker/groot.sif` for GR00T N1.7. To support a future policy, add
+`docker/<name>.def`; it appears in the menu with no script changes. It then asks
+whether to run Apptainer on this machine or through Docker. If `docker/<name>.sif`
+already exists you must confirm the replacement, and the existing image is
+retained if the build fails.
 
-To build locally instead, Docker must be installed and able to run privileged
-containers. Run from the local repository root:
+- **Apptainer (cluster):** uses `--ignore-fakeroot-command` to avoid injecting a host
+  fakeroot library that can require a newer glibc than the Ubuntu 22.04 image. This
+  does not require sudo if the cluster permits the necessary user namespaces, but may
+  fail if its fakeroot configuration is insufficient; ask the cluster administrator
+  or use the Docker option.
+- **Docker (local):** Docker must be installed and able to run privileged containers.
+  The build runs the `kaczmarj/apptainer:latest` builder with `--privileged` and
+  mounts the repository; only use it if you trust that image. It needs internet
+  access and substantial free space in Docker's storage and the repository
+  filesystem. A local `APPTAINER_TMPDIR` or `APPTAINER_CACHEDIR` is not passed into
+  the Docker builder.
 
-```bash
-./docker/build_pi05_sif.sh --docker
-# Add --force if docker/pi05.sif already exists.
-```
+[groot.def](../docker/groot.def) mirrors [Dockerfile.groot](../docker/Dockerfile.groot)
+(`lerobot[groot,training]==0.7.0`, ffmpeg 7 PPA). `sbatch.sh` is currently hard-coded
+to `docker/pi05.sif` and `docker/docker_train_pi05.sh`; use `docker/groot.sif` and
+`docker/docker_train_groot.sh` for GR00T.
 
 ### Transferring the image through a registry (ORAS)
 
 If the cluster cannot receive the file directly, push the locally built image to
-an OCI registry with [push_pi05_sif.sh](../docker/push_pi05_sif.sh) and pull it on
-the cluster. The `oras://` protocol needs only Apptainer on the cluster, not Docker.
+an OCI registry with [push_sif.sh](../docker/push_sif.sh) and pull it on the
+cluster. The `oras://` protocol needs only Apptainer on the cluster, not Docker.
+The script asks which built image to push, the registry account, registry host
+(default `ghcr.io`), tag (default `0.7.0`) and whether to use Apptainer or Docker.
+`REGISTRY_ACCOUNT`, `REGISTRY_HOST` and `SIF_TAG` set the prompt defaults.
 
 ```bash
-# Local machine (add --docker if Apptainer is not installed locally)
-./docker/push_pi05_sif.sh --account <your_account> [--registry ghcr.io] [--tag 0.7.0] --docker
+# Local machine
+./docker/push_sif.sh
 
-# Cluster, from the repository root
+# Cluster, from the repository root (the script prints the exact command)
 apptainer pull docker/pi05.sif oras://ghcr.io/<your_account>/pi05:0.7.0
 # example: apptainer pull docker/pi05.sif oras://ghcr.io/tzuyuan107/pi05:0.7.0
+# GR00T N1.7: apptainer pull docker/groot.sif oras://ghcr.io/<your_account>/groot:0.7.0
 ```
 
-- `<your_account>` is your **GitHub username** (`--account` or `REGISTRY_ACCOUNT`); registry and tag can also be set with `REGISTRY_HOST` and `SIF_TAG`. The default is `ghcr.io` with tag `0.7.0`.
+- `<your_account>` is your **GitHub username**.
 - **Create a personal access token first:** GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token, with the `write:packages` scope. A token with `read:packages` is enough to pull a private image on the cluster.
-- When the script prompts for a password, **paste the token**, not your GitHub password. With `--docker` it is stored only in a throwaway container.
+- When the script prompts for a password, **paste the token**, not your GitHub password. With the Docker option it is stored only in a throwaway container.
 - The registry must support OCI artifacts. GHCR does; Docker Hub support for ORAS artifacts is limited, so GHCR is the recommended default.
-- A GHCR package is private by default, and GitHub provides no API to change this from the push script. After the first push, make it public once in the web UI (package → Package settings → Danger Zone → Change visibility); the script prints the link. Later pushes keep the setting. Otherwise log in on the cluster first with `apptainer registry login --username <your_account> oras://ghcr.io`.
-- Add `--force` to `apptainer pull` to replace a stale `docker/pi05.sif`.
+- A GHCR package is private by default, and GitHub provides no API to change this from the push script. After the first push of each image (`pi05`, `groot`, ...), make it public once in the web UI (package → Package settings → Danger Zone → Change visibility); the script prints the link. Later pushes keep the setting. Otherwise log in on the cluster first with `apptainer registry login --username <your_account> oras://ghcr.io`.
+- Add `--force` to `apptainer pull` to replace a stale `docker/<name>.sif`.
 - Pushing sends a multi-GB image, and the pulled file is the same size, so allow for the space and time.
-
-The local build runs the `kaczmarj/apptainer:latest` builder with `--privileged`
-and mounts the repository; only use it if you trust that image. It needs internet
-access and substantial free space in Docker's storage and the repository
-filesystem. A local `APPTAINER_TMPDIR` or `APPTAINER_CACHEDIR` is not passed
-into the Docker builder.
 
 On the cluster, verify the copied or built image before training:
 
 ```bash
 apptainer exec docker/pi05.sif python -c "import lerobot; print(lerobot.__version__)"
-apptainer exec docker/pi05.sif lerobot-train --help | grep trackio
+apptainer exec docker/pi05.sif lerobot-train --help | grep trackio  # or docker/groot.sif
 mkdir -p .logs
 sbatch sbatch.sh
 ```
